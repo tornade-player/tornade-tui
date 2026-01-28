@@ -1,0 +1,22 @@
+[package]
+name = "tornade-tui"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "tornade-tui"
+path = "src/main.rs"
+
+[dependencies]
+# Terminal UI framework
+ratatui = "0.26"
+crossterm = "0.27"
+
+# Workspace dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+
+# Local dependency: Rust core library
+tornade-core = { path = "../tornade-core" }
