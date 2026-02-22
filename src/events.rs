@@ -1,8 +1,8 @@
 // Event handling for keyboard input
 // Arrow keys, space, /, q, etc.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::app::App;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
     // Search mode handling
@@ -90,7 +90,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Help
         KeyCode::Char('?') | KeyCode::F(1) => {
             app.status_message = String::from(
-                "Controls: ↑↓/jk=Navigate │ Enter/Space=Play │ p=Pause │ /=Search │ r=Reload │ q=Quit"
+                "Controls: ↑↓/jk=Navigate │ Enter/Space=Play │ p=Pause │ /=Search │ r=Reload │ q=Quit",
             );
         }
 

@@ -4,12 +4,9 @@
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::time::Duration;
 
@@ -43,35 +40,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        eprintln!("Error: {:?}", err);
+        eprintln!("Error: {err:?}");
     }
 
     Ok(())
 }
 
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> io::Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     loop {
         // Draw UI
         terminal.draw(|f| ui::draw(f, app))?;
 
         // Handle events with timeout for UI refresh
-        if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => {
-                        return Ok(());
-                    }
-                    _ => {
-                        events::handle_key_event(app, key);
-                    }
+        if event::poll(Duration::from_millis(250))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char('q') => {
+                    return Ok(());
+                }
+                _ => {
+                    events::handle_key_event(app, key);
                 }
             }
         }
 
         // Periodic refresh
-        app.refresh_state();
+        App::refresh_state();
     }
 }

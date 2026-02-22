@@ -2,11 +2,11 @@
 // Layout: header (stats), main (track list), footer (status bar)
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame,
 };
 
 use crate::app::{App, View};
@@ -16,9 +16,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),     // Body
-            Constraint::Length(3),  // Footer
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Body
+            Constraint::Length(3), // Footer
         ])
         .split(f.size());
 
@@ -50,10 +50,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            stats_text,
-            Style::default().fg(Color::Gray),
-        )),
+        Line::from(Span::styled(stats_text, Style::default().fg(Color::Gray))),
     ])
     .block(Block::default().borders(Borders::BOTTOM))
     .alignment(Alignment::Center);
@@ -93,7 +90,7 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
             let duration_secs = track.duration.as_secs();
             let minutes = duration_secs / 60;
             let seconds = duration_secs % 60;
-            let duration_str = format!("{}:{:02}", minutes, seconds);
+            let duration_str = format!("{minutes}:{seconds:02}");
 
             let format_str = match track.file_type {
                 tornade_core::models::AudioFormat::Flac => "FLAC",
@@ -107,7 +104,7 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
                 format_str,
                 track
                     .bit_depth
-                    .map(|d| format!("{}bit", d))
+                    .map(|d| format!("{d}bit"))
                     .unwrap_or_default(),
                 track.sample_rate.unwrap_or(0) / 1000
             );
@@ -162,7 +159,10 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             &app.status_message,
             Style::default().fg(Color::Green),
         )),
-        Line::from(Span::styled(help_text, Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            help_text,
+            Style::default().fg(Color::DarkGray),
+        )),
     ])
     .block(Block::default().borders(Borders::TOP));
 
