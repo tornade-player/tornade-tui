@@ -1,15 +1,17 @@
 // Application state management
 // Uses tornade-core services directly (TUI has direct Rust access)
 
-use tornade_core::{db, services::*, utils::AppPaths, models::*};
 use std::time::Duration;
+use tornade_core::{db, models::AudioFormat, services::SearchService, utils::AppPaths};
 
 // Simplified track for TUI display
 #[derive(Debug, Clone)]
 pub struct TuiTrack {
+    #[expect(dead_code, reason = "Stored for future navigation to track detail")]
     pub id: i64,
     pub title: String,
     pub artist_id: i64,
+    #[expect(dead_code, reason = "Stored for future navigation to album detail")]
     pub album_id: Option<i64>,
     pub duration: Duration,
     pub file_type: AudioFormat,
@@ -21,13 +23,13 @@ pub struct TuiTrack {
 pub enum View {
     Library,
     Albums,
+    #[expect(dead_code, reason = "Search view navigation not yet wired up")]
     Search,
 }
 
 pub struct App {
     pub view: View,
     pub tracks: Vec<TuiTrack>,
-    pub albums: Vec<Album>,
     pub selected_index: usize,
     pub status_message: String,
     pub search_query: String,
@@ -45,18 +47,18 @@ impl App {
         // Initialize application paths
         let app_paths = match AppPaths::new() {
             Ok(paths) => paths,
-            Err(e) => panic!("Failed to initialize app paths: {}", e),
+            Err(e) => panic!("Failed to initialize app paths: {e}"),
         };
 
         // Create database connection pool
         let pool = match db::create_pool(app_paths.database_path()) {
             Ok(pool) => pool,
-            Err(e) => panic!("Failed to create database pool: {}", e),
+            Err(e) => panic!("Failed to create database pool: {e}"),
         };
 
         // Initialize database schema
         if let Err(e) = db::initialize_database(&pool) {
-            panic!("Failed to initialize database: {}", e);
+            panic!("Failed to initialize database: {e}");
         }
 
         let search_service = SearchService::new(pool.clone());
@@ -64,9 +66,10 @@ impl App {
         let mut app = App {
             view: View::Library,
             tracks: Vec::new(),
-            albums: Vec::new(),
             selected_index: 0,
-            status_message: String::from("Welcome to Tornade TUI! Press 'q' to quit, '/' to search"),
+            status_message: String::from(
+                "Welcome to Tornade TUI! Press 'q' to quit, '/' to search",
+            ),
             search_query: String::new(),
             search_mode: false,
             album_count: 0,
@@ -88,37 +91,26 @@ impl App {
         let conn = match self.pool.get() {
             Ok(conn) => conn,
             Err(e) => {
-                self.status_message = format!("Failed to get connection: {}", e);
+                self.status_message = format!("Failed to get connection: {e}");
                 return;
             }
         };
 
         // Query counts directly
-        let album_count: Result<i64, _> = conn.query_row(
-            "SELECT COUNT(*) FROM albums",
-            [],
-            |row| row.get(0)
-        );
-        let artist_count: Result<i64, _> = conn.query_row(
-            "SELECT COUNT(*) FROM artists",
-            [],
-            |row| row.get(0)
-        );
-        let track_count: Result<i64, _> = conn.query_row(
-            "SELECT COUNT(*) FROM tracks",
-            [],
-            |row| row.get(0)
-        );
+        let album_count: Result<i64, _> =
+            conn.query_row("SELECT COUNT(*) FROM albums", [], |row| row.get(0));
+        let artist_count: Result<i64, _> =
+            conn.query_row("SELECT COUNT(*) FROM artists", [], |row| row.get(0));
+        let track_count: Result<i64, _> =
+            conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0));
 
         match (album_count, artist_count, track_count) {
             (Ok(albums), Ok(artists), Ok(tracks)) => {
                 self.album_count = albums;
                 self.artist_count = artists;
                 self.track_count = tracks;
-                self.status_message = format!(
-                    "Library: {} tracks, {} albums, {} artists",
-                    tracks, albums, artists
-                );
+                self.status_message =
+                    format!("Library: {tracks} tracks, {albums} albums, {artists} artists");
             }
             _ => {
                 self.status_message = String::from("Failed to load library stats");
@@ -131,7 +123,7 @@ impl App {
         let conn = match self.pool.get() {
             Ok(conn) => conn,
             Err(e) => {
-                self.status_message = format!("Failed to get connection: {}", e);
+                self.status_message = format!("Failed to get connection: {e}");
                 return;
             }
         };
@@ -152,7 +144,8 @@ impl App {
                         artist_id: row.get(2)?,
                         album_id: row.get(3)?,
                         duration: Duration::from_millis(duration_ms),
-                        file_type: AudioFormat::from_str(&file_type_str).unwrap_or(AudioFormat::Flac),
+                        file_type: AudioFormat::from_str(&file_type_str)
+                            .unwrap_or(AudioFormat::Flac),
                         sample_rate: row.get(6)?,
                         bit_depth: row.get(7)?,
                     })
@@ -165,23 +158,26 @@ impl App {
                             Ok(tracks_data) => {
                                 self.tracks = tracks_data;
                                 if self.tracks.is_empty() {
-                                    self.status_message = String::from("No tracks found. Scan a library folder first.");
+                                    self.status_message = String::from(
+                                        "No tracks found. Scan a library folder first.",
+                                    );
                                 } else {
-                                    self.status_message = format!("Loaded {} tracks", self.tracks.len());
+                                    self.status_message =
+                                        format!("Loaded {} tracks", self.tracks.len());
                                 }
                             }
                             Err(e) => {
-                                self.status_message = format!("Failed to fetch tracks: {}", e);
+                                self.status_message = format!("Failed to fetch tracks: {e}");
                             }
                         }
                     }
                     Err(e) => {
-                        self.status_message = format!("Failed to query tracks: {}", e);
+                        self.status_message = format!("Failed to query tracks: {e}");
                     }
                 }
             }
             Err(e) => {
-                self.status_message = format!("Failed to prepare query: {}", e);
+                self.status_message = format!("Failed to prepare query: {e}");
             }
         }
     }
@@ -189,7 +185,10 @@ impl App {
     // T108: Play selected track (placeholder - player not implemented in TUI)
     pub fn play_selected(&mut self) {
         if let Some(track) = self.tracks.get(self.selected_index) {
-            self.status_message = format!("▶ Would play: {} (Player not implemented in TUI)", track.title);
+            self.status_message = format!(
+                "▶ Would play: {} (Player not implemented in TUI)",
+                track.title
+            );
         }
     }
 
@@ -206,21 +205,30 @@ impl App {
 
         match self.search_service.search(&self.search_query) {
             Ok(results) => {
-                self.tracks = results.tracks.into_iter().take(50).map(|t| TuiTrack {
-                    id: t.id,
-                    title: t.title,
-                    artist_id: t.artist_id,
-                    album_id: t.album_id,
-                    duration: t.duration,
-                    file_type: t.file_type,
-                    sample_rate: t.sample_rate,
-                    bit_depth: t.bit_depth,
-                }).collect();
+                self.tracks = results
+                    .tracks
+                    .into_iter()
+                    .take(50)
+                    .map(|t| TuiTrack {
+                        id: t.id,
+                        title: t.title,
+                        artist_id: t.artist_id,
+                        album_id: t.album_id,
+                        duration: t.duration,
+                        file_type: t.file_type,
+                        sample_rate: t.sample_rate,
+                        bit_depth: t.bit_depth,
+                    })
+                    .collect();
                 self.selected_index = 0;
-                self.status_message = format!("Found {} tracks for '{}'", self.tracks.len(), self.search_query);
+                self.status_message = format!(
+                    "Found {} tracks for '{}'",
+                    self.tracks.len(),
+                    self.search_query
+                );
             }
             Err(e) => {
-                self.status_message = format!("Search error: {}", e);
+                self.status_message = format!("Search error: {e}");
             }
         }
     }
@@ -238,7 +246,7 @@ impl App {
         }
     }
 
-    pub fn refresh_state(&mut self) {
+    pub fn refresh_state() {
         // Placeholder for periodic state refresh
     }
 }
