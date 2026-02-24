@@ -1,6 +1,6 @@
 [package]
 name = "tornade-tui"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 
 [[bin]]
@@ -12,11 +12,11 @@ path = "src/main.rs"
 ratatui = "0.26"
 crossterm = "0.27"
 
-# Workspace dependencies
-serde = { workspace = true }
-serde_json = { workspace = true }
-log = { workspace = true }
-env_logger = { workspace = true }
+# Core library (git dependency — standalone repo)
+tornade-core = { git = "https://github.com/tornade-player/tornade-core", tag = "v0.3.0" }
 
-# Local dependency: Rust core library
-tornade-core = { path = "../tornade-core" }
+# Standalone dependencies (expanded from workspace)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+env_logger = "0.11"
