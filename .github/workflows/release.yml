@@ -85,10 +85,7 @@ jobs:
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
-        run: |
-          Compress-Archive \
-            -Path target\release\tornade-tui.exe \
-            -DestinationPath "tornade-tui-${{ needs.tag.outputs.version }}-${{ matrix.platform }}.zip"
+        run: Compress-Archive -Path target\release\tornade-tui.exe -DestinationPath "tornade-tui-${{ needs.tag.outputs.version }}-${{ matrix.platform }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
