@@ -1,170 +1,168 @@
-// UI rendering with ratatui
-// Layout: header (stats), main (track list), footer (status bar)
-
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{App, View};
+use crate::{
+    app::{AppState, InputMode, StatusKind},
+    views::View,
+    widgets::{command_bar, confirm_dialog, help_overlay, input_dialog, player_bar, sidebar},
+};
 
-pub fn draw(f: &mut Frame, app: &App) {
-    // Main layout: [Header, Body, Footer]
-    let chunks = Layout::default()
+pub fn draw(frame: &mut Frame, app: &mut AppState) {
+    let area = frame.area();
+
+    // Main layout: body (fills remaining) + player bar at bottom
+    let main_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Body
-            Constraint::Length(3), // Footer
-        ])
-        .split(f.size());
+        .constraints([Constraint::Min(0), Constraint::Length(4)])
+        .split(area);
 
-    draw_header(f, app, chunks[0]);
-    draw_body(f, app, chunks[1]);
-    draw_footer(f, app, chunks[2]);
+    let body_area = main_chunks[0];
+    let player_area = main_chunks[1];
+
+    // Body layout: sidebar (fixed) + content
+    let body_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(18), Constraint::Min(0)])
+        .split(body_area);
+
+    let sidebar_area = body_chunks[0];
+    let content_area = body_chunks[1];
+
+    // 1. Sidebar
+    sidebar::render(frame, sidebar_area, app.nav.current().sidebar_entry());
+
+    // 2. Content area (with optional status bar at bottom)
+    let content_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(content_area);
+
+    let view_area = content_chunks[0];
+    let status_area = content_chunks[1];
+
+    // Render current view
+    render_view(frame, app, view_area);
+
+    // Status bar
+    render_status(frame, app, status_area);
+
+    // 3. Player bar
+    player_bar::render(frame, player_area, &app.player_cache);
+
+    // 4. Overlays (rendered on top)
+    render_overlays(frame, app, area);
 }
 
-fn draw_header(f: &mut Frame, app: &App, area: Rect) {
-    let title = if app.search_mode {
-        format!("🎵 Tornade TUI - Search: {}_", app.search_query)
-    } else {
-        match app.view {
-            View::Library => String::from("🎵 Tornade TUI - Library"),
-            View::Albums => String::from("🎵 Tornade TUI - Albums"),
-            View::Search => String::from("🎵 Tornade TUI - Search Results"),
+fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    match app.nav.current_mut() {
+        View::Library(s) => s.render(frame, area),
+        View::Albums(s) => s.render(frame, area),
+        View::Artists(s) => s.render(frame, area),
+        View::Genres(s) => s.render(frame, area),
+        View::Playlists(s) => s.render(frame, area),
+        View::AlbumDetail(s) => s.render(frame, area),
+        View::ArtistDetail(s) => s.render(frame, area),
+        View::GenreDetail(s) => s.render(frame, area),
+        View::PlaylistDetail(s) => s.render(frame, area),
+        View::Scan(s) => s.render(frame, area),
+        View::Search(s) => s.render(frame, area),
+        View::Queue(s) => {
+            // Queue view needs access to player_cache and library; resolve tracks here
+            let _ = s; // borrow ends
+            render_queue_view(frame, app, area);
         }
-    };
-
-    let stats_text = format!(
-        " {} tracks │ {} albums │ {} artists ",
-        app.track_count, app.album_count, app.artist_count
-    );
-
-    let header = Paragraph::new(vec![
-        Line::from(Span::styled(
-            title,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(stats_text, Style::default().fg(Color::Gray))),
-    ])
-    .block(Block::default().borders(Borders::BOTTOM))
-    .alignment(Alignment::Center);
-
-    f.render_widget(header, area);
+    }
 }
 
-fn draw_body(f: &mut Frame, app: &App, area: Rect) {
-    if app.tracks.is_empty() {
-        // Empty state
-        let empty_msg = Paragraph::new(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "No tracks loaded",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Scan a music library using the Rust API or add tracks via CLI",
-                Style::default().fg(Color::Gray),
-            )),
-        ])
-        .alignment(Alignment::Center);
+fn render_queue_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    // Resolve queue track IDs to Track objects for display
+    let tracks: Vec<tornade_core::models::Track> = app.player_cache.queue.iter()
+        .filter_map(|&id| app.library.get_track(id).ok().flatten())
+        .collect();
+    let active_index = app.player_cache.queue_index;
+    let skipped = app.player_cache.skipped_track_ids.clone();
 
-        f.render_widget(empty_msg, area);
-        return;
+    if let View::Queue(s) = app.nav.current_mut() {
+        s.sync_selection(tracks.len(), active_index);
+        s.render(frame, area, &tracks, active_index, &skipped);
+    }
+}
+
+fn render_status(frame: &mut Frame, app: &AppState, area: Rect) {
+    let (text, style) = match &app.status {
+        Some(s) => {
+            let color = match s.kind {
+                StatusKind::Info => Color::Cyan,
+                StatusKind::Success => Color::Green,
+                StatusKind::Error => Color::Red,
+            };
+            (s.text.as_str(), Style::default().fg(color))
+        }
+        None => ("", Style::default().fg(Color::DarkGray)),
+    };
+    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+}
+
+fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    // Command bar
+    if app.input_mode == InputMode::Command {
+        command_bar::render(frame, area, &app.command_input, &app.command_completions);
     }
 
-    // Track list
-    let items: Vec<ListItem> = app
-        .tracks
-        .iter()
-        .enumerate()
-        .map(|(i, track)| {
-            let duration_secs = track.duration.as_secs();
-            let minutes = duration_secs / 60;
-            let seconds = duration_secs % 60;
-            let duration_str = format!("{minutes}:{seconds:02}");
+    // Text input dialog
+    if app.input_mode == InputMode::TextInput {
+        if let Some(ref ctx) = app.text_input {
+            input_dialog::render(frame, &ctx.prompt, &ctx.value);
+        }
+    }
 
-            let format_str = match track.file_type {
-                tornade_core::models::AudioFormat::Flac => "FLAC",
-                tornade_core::models::AudioFormat::Mp3 => "MP3",
-                tornade_core::models::AudioFormat::Aac => "AAC",
-                tornade_core::models::AudioFormat::Alac => "ALAC",
-            };
+    // Confirm dialog
+    if app.input_mode == InputMode::Confirm {
+        if let Some(ref ctx) = app.confirm {
+            confirm_dialog::render(frame, &ctx.prompt);
+        }
+    }
 
-            let format_info = format!(
-                "{} {} {}kHz",
-                format_str,
-                track
-                    .bit_depth
-                    .map(|d| format!("{d}bit"))
-                    .unwrap_or_default(),
-                track.sample_rate.unwrap_or(0) / 1000
-            );
+    // Playlist selector overlay
+    if app.show_playlist_selector {
+        render_playlist_selector(frame, app, area);
+    }
 
-            let content = format!(
-                "{:3}. {} - Artist #{} [{}] {}",
-                i + 1,
-                track.title,
-                track.artist_id,
-                duration_str,
-                format_info
-            );
-
-            let style = if i == app.selected_index {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            ListItem::new(Line::from(Span::styled(content, style)))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Tracks ({}) ", app.tracks.len())),
-        )
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    f.render_widget(list, area);
+    // Help overlay (always on top)
+    if app.show_help {
+        help_overlay::render(frame);
+    }
 }
 
-fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let help_text = if app.search_mode {
-        "ESC: Cancel │ ENTER: Search"
-    } else {
-        "↑/↓: Navigate │ ENTER/SPACE: Play │ /: Search │ Q: Quit"
-    };
+fn render_playlist_selector(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    let playlists = app.playlists.list_playlists().unwrap_or_default();
+    let popup_area = centered_rect(50, 50, area);
+    frame.render_widget(Clear, popup_area);
 
-    let footer = Paragraph::new(vec![
-        Line::from(Span::styled(
-            &app.status_message,
-            Style::default().fg(Color::Green),
-        )),
-        Line::from(Span::styled(
-            help_text,
-            Style::default().fg(Color::DarkGray),
-        )),
-    ])
-    .block(Block::default().borders(Borders::TOP));
+    let items: Vec<ListItem> = playlists.iter().map(|p| {
+        ListItem::new(Line::from(Span::raw(p.name.as_str())))
+    }).collect();
 
-    f.render_widget(footer, area);
+    let list = List::new(items)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title(" Add to Playlist  [Enter select  ESC cancel] ")
+            .border_style(Style::default().fg(Color::Cyan)))
+        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(list, popup_area, &mut app.playlist_selector_state);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let width = r.width * percent_x / 100;
+    let height = r.height * percent_y / 100;
+    let x = r.x + (r.width.saturating_sub(width)) / 2;
+    let y = r.y + (r.height.saturating_sub(height)) / 2;
+    Rect { x, y, width: width.min(r.width), height: height.min(r.height) }
 }
