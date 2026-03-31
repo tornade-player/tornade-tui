@@ -90,8 +90,14 @@ fn run_loop(
             needs_redraw = false;
         }
 
-        // Poll only for the time remaining until next tick
-        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        // Poll only for the time remaining until next tick.
+        // Use a short timeout while background image loads are in progress so we
+        // redraw quickly as each image becomes ready.
+        let timeout = if app.has_pending_images {
+            Duration::from_millis(30)
+        } else {
+            tick_rate.saturating_sub(last_tick.elapsed())
+        };
         if event::poll(timeout)? {
             match event::read()? {
                 Event::Key(key) => {

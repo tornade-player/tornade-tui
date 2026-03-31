@@ -119,6 +119,9 @@ pub struct AppState {
 
     // Status bar
     pub status: Option<StatusMessage>,
+
+    // Set to true when background image loads are in progress; drives faster poll timeout
+    pub has_pending_images: bool,
 }
 
 impl AppState {
@@ -157,6 +160,7 @@ impl AppState {
             cached_queue_ids: Vec::new(),
             sidebar_playlists: Vec::new(),
             status: None,
+            has_pending_images: false,
         };
         state.reload_current_view();
         state.refresh_sidebar_playlists();

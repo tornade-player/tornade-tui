@@ -49,7 +49,7 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(content_area);
 
-    render_view(frame, app, content_chunks[0]);
+    app.has_pending_images = render_view(frame, app, content_chunks[0]);
     render_status(frame, app, content_chunks[1]);
 
     // 3. Right panel: queue list (top) + compact player (bottom)
@@ -65,24 +65,25 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
     render_overlays(frame, app, area);
 }
 
-fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
+/// Returns true when background image loads are still in progress (caller should redraw soon).
+fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
     match app.nav.current_mut() {
-        View::Library(s) => s.render(frame, area, focused),
+        View::Library(s) => { s.render(frame, area, focused); false }
         View::Albums(s) => s.render(frame, area, focused, &mut app.picker),
-        View::Artists(s) => s.render(frame, area, focused),
-        View::Genres(s) => s.render(frame, area, focused),
-        View::Playlists(s) => s.render(frame, area, focused),
-        View::AlbumDetail(s) => s.render(frame, area, focused),
-        View::ArtistDetail(s) => s.render(frame, area, focused),
-        View::GenreDetail(s) => s.render(frame, area, focused),
-        View::PlaylistDetail(s) => s.render(frame, area, focused),
-        View::Scan(s) => s.render(frame, area),
-        View::Search(s) => s.render(frame, area, focused),
+        View::Artists(s) => { s.render(frame, area, focused); false }
+        View::Genres(s) => { s.render(frame, area, focused); false }
+        View::Playlists(s) => { s.render(frame, area, focused); false }
+        View::AlbumDetail(s) => { s.render(frame, area, focused); false }
+        View::ArtistDetail(s) => { s.render(frame, area, focused); false }
+        View::GenreDetail(s) => { s.render(frame, area, focused); false }
+        View::PlaylistDetail(s) => { s.render(frame, area, focused); false }
+        View::Scan(s) => { s.render(frame, area); false }
+        View::Search(s) => { s.render(frame, area, focused); false }
         View::Queue(s) => {
-            // Queue view needs access to player_cache and library; resolve tracks here
-            let _ = s; // borrow ends
+            let _ = s;
             render_queue_view(frame, app, area);
+            false
         }
     }
 }

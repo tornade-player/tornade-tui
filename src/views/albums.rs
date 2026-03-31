@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use image::Rgba;
 use ratatui::{
     Frame,
@@ -22,10 +23,11 @@ const GAP_W: u16 = 3;
 const GAP_H: u16 = 2;
 // Left/right padding inside the grid area
 const GRID_PAD: u16 = 1;
-// Max images to load (resize+encode) per render frame to avoid CPU spikes
-const MAX_LOADS_PER_FRAME: usize = 3;
 // Corner radius as fraction of the shorter image dimension
 const CORNER_RADIUS_FRAC: f32 = 0.12;
+
+/// Images decoded in background threads, waiting to be encoded by the picker on the main thread.
+type PendingQueue = Arc<Mutex<Vec<(i64, image::DynamicImage)>>>;
 
 pub struct AlbumsState {
     pub albums: Vec<Album>,
@@ -41,6 +43,9 @@ pub struct AlbumsState {
     cell_stride_h: u16,
     image_cache: HashMap<i64, StatefulProtocol>,
     scrollbar_state: ScrollbarState,
+    // Background loading
+    pending_decoded: PendingQueue,
+    loading_ids: HashSet<i64>,
 }
 
 impl Default for AlbumsState {
@@ -53,16 +58,19 @@ impl Default for AlbumsState {
             scroll_row: 0,
             cols: 4,
             last_grid_area: Rect::default(),
-            img_cols: IMG_H, // sensible default before first render
+            img_cols: IMG_H,
             cell_stride_w: IMG_H + GAP_W,
             cell_stride_h: IMG_H + TEXT_PADDING + TEXT_H + GAP_H,
             image_cache: HashMap::new(),
             scrollbar_state: ScrollbarState::default(),
+            pending_decoded: Arc::new(Mutex::new(Vec::new())),
+            loading_ids: HashSet::new(),
         }
     }
 }
 
-/// Apply rounded corners to an image by zeroing alpha in corner regions.
+/// Apply rounded corners by zeroing alpha in corner regions.
+/// Called in background threads - operates on an already-resized image.
 fn apply_rounded_corners(img: image::DynamicImage) -> image::DynamicImage {
     let (w, h) = (img.width(), img.height());
     let mut rgba = img.into_rgba8();
@@ -73,7 +81,6 @@ fn apply_rounded_corners(img: image::DynamicImage) -> image::DynamicImage {
         for x in 0..w {
             let fx = x as f32;
             let fy = y as f32;
-            // Distance from each corner's arc center; transparent if outside the arc
             let in_corner =
                 (fx < r && fy < r && (fx - r).hypot(fy - r) > r) ||
                 (fx > fw - r - 1.0 && fy < r && (fx - (fw - r - 1.0)).hypot(fy - r) > r) ||
@@ -108,7 +115,6 @@ impl AlbumsState {
         self.filtered_albums().get(self.selected).copied()
     }
 
-    /// Returns the flat album index at terminal coordinates (x, y), if any.
     pub fn album_at_pos(&self, x: u16, y: u16) -> Option<usize> {
         let a = self.last_grid_area;
         if a.width == 0 || x < a.x || y < a.y || x >= a.x + a.width || y >= a.y + a.height {
@@ -159,21 +165,21 @@ impl AlbumsState {
         if len > 0 { self.selected = len - 1; }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) {
-        // Compute square image width from font metrics
-        // font_size() = (cell_width_px, cell_height_px)
+    /// Render the albums grid. Returns `true` when background image loads are still in progress
+    /// (caller should redraw soon).
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) -> bool {
+        // Compute square image dimensions from font metrics
         let font = picker.font_size();
         self.img_cols = if font.0 > 0 {
             ((IMG_H as u32 * font.1 as u32) / font.0 as u32) as u16
         } else {
             IMG_H
         };
-        self.img_cols = self.img_cols.max(14); // never narrower than 14 cols
+        self.img_cols = self.img_cols.max(14);
 
         self.cell_stride_w = self.img_cols + GAP_W;
         self.cell_stride_h = IMG_H + TEXT_PADDING + TEXT_H + GAP_H;
 
-        // Left/right padding + 1 col on the right for the scrollbar
         let grid_area = Rect {
             x: area.x + GRID_PAD,
             width: area.width.saturating_sub(GRID_PAD * 2 + 1),
@@ -197,7 +203,7 @@ impl AlbumsState {
         let start = self.scroll_row * self.cols;
         let end = ((self.scroll_row + rows_visible) * self.cols).min(total);
 
-        // Collect visible album data (owned) to release the immutable borrow
+        // Collect visible album data (owned) to release the immutable borrow on self
         type AlbumTuple = (usize, i64, String, String, Option<u16>,
                            Option<std::path::PathBuf>, Option<std::path::PathBuf>);
         let visible: Vec<AlbumTuple> = {
@@ -208,35 +214,52 @@ impl AlbumsState {
             )).collect()
         };
 
-        // Lazy-load images for visible albums.
-        // Pre-resize to exact pixel size so rounded corners land exactly at image edges.
-        // Use Triangle (bilinear) filter: ~10x faster than Lanczos3, adequate for thumbnails.
-        // Limit to MAX_LOADS_PER_FRAME per render to avoid CPU spikes on first paint.
-        let (fw, fh) = picker.font_size();
-        let target_px_w = (self.img_cols as u32) * (fw as u32);
-        let target_px_h = (IMG_H as u32) * (fh as u32);
-        let mut loads_this_frame = 0;
-        for (_, id, _, _, _, online, local) in &visible {
-            if loads_this_frame >= MAX_LOADS_PER_FRAME { break; }
-            if !self.image_cache.contains_key(id) {
-                let path = online.as_ref().or(local.as_ref());
-                if let Some(img) = path.and_then(|p| image::open(p).ok()) {
-                    let img = img.resize_to_fill(
-                        target_px_w.max(1), target_px_h.max(1),
-                        image::imageops::FilterType::Triangle,
-                    );
-                    let img = apply_rounded_corners(img);
-                    self.image_cache.insert(*id, picker.new_resize_protocol(img));
-                    loads_this_frame += 1;
+        // 1. Drain images decoded by background threads → encode into StatefulProtocol
+        //    (picker.new_resize_protocol must run on the main thread)
+        {
+            if let Ok(mut pending) = self.pending_decoded.try_lock() {
+                for (id, img) in pending.drain(..) {
+                    self.loading_ids.remove(&id);
+                    self.image_cache.insert(id, picker.new_resize_protocol(img));
                 }
             }
         }
+
+        // 2. Spawn background threads for visible images not yet in cache or loading
+        let (fw, fh) = (font.0, font.1);
+        let target_px_w = (self.img_cols as u32) * (fw as u32);
+        let target_px_h = (IMG_H as u32) * (fh as u32);
+        for (_, id, _, _, _, online, local) in &visible {
+            if self.image_cache.contains_key(id) || self.loading_ids.contains(id) { continue; }
+            let path = online.as_ref().or(local.as_ref()).cloned();
+            if let Some(path) = path {
+                self.loading_ids.insert(*id);
+                let id = *id;
+                let pending = Arc::clone(&self.pending_decoded);
+                std::thread::spawn(move || {
+                    if let Ok(img) = image::open(&path) {
+                        let img = img.resize_to_fill(
+                            target_px_w.max(1), target_px_h.max(1),
+                            image::imageops::FilterType::Triangle,
+                        );
+                        let img = apply_rounded_corners(img);
+                        if let Ok(mut guard) = pending.lock() {
+                            guard.push((id, img));
+                        }
+                    }
+                });
+            }
+        }
+
+        // Whether any images are still pending (loading or waiting to be encoded)
+        let has_pending = !self.loading_ids.is_empty()
+            || self.pending_decoded.try_lock().map(|g| !g.is_empty()).unwrap_or(true);
 
         let img_cols = self.img_cols;
         let cell_stride_w = self.cell_stride_w;
         let cell_stride_h = self.cell_stride_h;
 
-        // Render cells
+        // 3. Render visible cells
         for (flat_idx, id, title, artist, year, _, _) in &visible {
             let row = flat_idx / self.cols;
             let col = flat_idx % self.cols;
@@ -255,7 +278,7 @@ impl AlbumsState {
             render_cell(frame, cell_rect, title, artist, *year, is_sel, focused, protocol, img_cols);
         }
 
-        // Scrollbar
+        // 4. Scrollbar
         self.scrollbar_state = ScrollbarState::new(total_rows).position(self.scroll_row);
         let scrollbar_area = Rect {
             x: area.x + area.width.saturating_sub(1),
@@ -267,6 +290,8 @@ impl AlbumsState {
             scrollbar_area,
             &mut self.scrollbar_state,
         );
+
+        has_pending
     }
 }
 
