@@ -55,13 +55,38 @@ pub enum SidebarEntry {
 impl SidebarEntry {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Tracks => "1  Tracks",
-            Self::Albums => "2  Albums",
-            Self::Artists => "3  Artists",
-            Self::Genres => "4  Genres",
-            Self::Search => "5  Search",
+            Self::Tracks => "Tracks",
+            Self::Albums => "Albums",
+            Self::Artists => "Artists",
+            Self::Genres => "Genres",
+            Self::Search => "Search",
             Self::Playlists => "Playlists",
             Self::Queue => "Queue",
+        }
+    }
+
+    /// Nerd Font glyph for this entry (nf-fa-* range, single codepoint).
+    pub fn glyph(&self) -> &'static str {
+        match self {
+            Self::Search => "\u{f002}",     // nf-fa-search
+            Self::Tracks => "\u{f001}",     // nf-fa-music
+            Self::Albums => "\u{f51f}",     // nf-fa-compact_disc
+            Self::Artists => "\u{f007}",    // nf-fa-user
+            Self::Genres => "\u{f02b}",     // nf-fa-tag
+            Self::Playlists => "\u{f03a}",  // nf-fa-list
+            Self::Queue => "\u{f0cb}",      // nf-fa-list_ol
+        }
+    }
+
+    /// Keyboard shortcut digit for this entry, if any.
+    pub fn shortcut(&self) -> Option<u8> {
+        match self {
+            Self::Tracks => Some(1),
+            Self::Albums => Some(2),
+            Self::Artists => Some(3),
+            Self::Genres => Some(4),
+            Self::Search => Some(5),
+            Self::Playlists | Self::Queue => None,
         }
     }
 

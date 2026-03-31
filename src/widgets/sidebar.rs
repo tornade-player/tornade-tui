@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, List, ListItem},
+    widgets::{Block, List, ListItem, Padding},
 };
 use crate::utils::truncate;
 use crate::views::SidebarEntry;
@@ -26,45 +26,50 @@ pub fn render(
     cursor: usize,
     playlists: &[(i64, String)],
 ) {
-    // inner width for label truncation (no borders)
-    let label_w = (area.width as usize).saturating_sub(3); // 3 indent chars
+    // Content width: area - 2 (borders) - 2 (h padding) - 2 (glyph cols) - 1 (space after glyph)
+    let label_w = (area.width as usize).saturating_sub(7);
 
     let mut items: Vec<ListItem> = Vec::new();
     let mut sel_idx: usize = 0;
 
     // ── "Library" header ──────────────────────────────────────────────────────
-    items.push(header_item(" Library"));
+    items.push(header_item("Library"));
 
     for entry in &LIBRARY_ENTRIES {
         let is_active = *entry == active_entry
             && !matches!(active_entry, SidebarEntry::Playlists | SidebarEntry::Queue);
         let is_cursor = focused && sel_idx == cursor;
-        items.push(nav_item(entry.label(), label_w, is_active, is_cursor));
+        items.push(nav_item(entry.glyph(), entry.label(), entry.shortcut(), is_active, is_cursor));
+        items.push(blank());
         sel_idx += 1;
     }
 
     // ── "Playlists" header ────────────────────────────────────────────────────
-    items.push(header_item(" Playlists"));
+    items.push(blank()); // extra gap before section header
+    items.push(header_item("Playlists"));
+    items.push(blank());
 
     if playlists.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
-            "   No playlists",
+            "No playlists",
             Style::default().fg(Color::DarkGray),
         ))));
     } else {
         for (id, name) in playlists {
             let is_active = active_playlist_id == Some(*id);
             let is_cursor = focused && sel_idx == cursor;
-            items.push(nav_item(&truncate(name, label_w), label_w, is_active, is_cursor));
+            let glyph = SidebarEntry::Playlists.glyph();
+            items.push(nav_item(glyph, &truncate(name, label_w), None, is_active, is_cursor));
+            items.push(blank());
             sel_idx += 1;
         }
     }
 
-    // Slightly darker background than the terminal default, no border, no title
-    let bg = Color::Rgb(28, 30, 38);
-    let list = List::new(items).block(
-        Block::default().style(Style::default().bg(bg)),
-    );
+    let bg = Color::Rgb(22, 24, 32);
+    let block = Block::default()
+        .padding(Padding::horizontal(1))
+        .style(Style::default().bg(bg));
+    let list = List::new(items).block(block);
     frame.render_widget(list, area);
 }
 
@@ -77,8 +82,16 @@ fn header_item(label: &str) -> ListItem<'static> {
     )))
 }
 
-fn nav_item(label: &str, _max_w: usize, active: bool, cursor: bool) -> ListItem<'static> {
-    let text = format!("   {}", label);
+fn blank() -> ListItem<'static> {
+    ListItem::new(Line::from(""))
+}
+
+fn nav_item(glyph: &str, name: &str, shortcut: Option<u8>, active: bool, cursor: bool) -> ListItem<'static> {
+    let suffix = match shortcut {
+        Some(n) => format!(" [{}]", n),
+        None => String::new(),
+    };
+    let text = format!("{} {}{}", glyph, name, suffix);
     let fg = if active {
         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
     } else {
