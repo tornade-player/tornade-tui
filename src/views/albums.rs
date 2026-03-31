@@ -12,14 +12,16 @@ use tornade_core::{models::Album, services::LibraryService};
 use crate::utils::truncate;
 
 // Image height in terminal rows (fixed); width is computed from font metrics to make it square
-const IMG_H: u16 = 12;
+const IMG_H: u16 = 8;
 // Text rows below the image
 const TEXT_H: u16 = 3;
+// Padding rows between image bottom and text
+const TEXT_PADDING: u16 = 1;
 // Gap between cells (cols/rows)
-const GAP_W: u16 = 1;
-const GAP_H: u16 = 1;
+const GAP_W: u16 = 3;
+const GAP_H: u16 = 2;
 // Corner radius as fraction of the shorter image dimension
-const CORNER_RADIUS_FRAC: f32 = 0.08;
+const CORNER_RADIUS_FRAC: f32 = 0.12;
 
 pub struct AlbumsState {
     pub albums: Vec<Album>,
@@ -49,7 +51,7 @@ impl Default for AlbumsState {
             last_grid_area: Rect::default(),
             img_cols: IMG_H, // sensible default before first render
             cell_stride_w: IMG_H + GAP_W,
-            cell_stride_h: IMG_H + TEXT_H + GAP_H,
+            cell_stride_h: IMG_H + TEXT_PADDING + TEXT_H + GAP_H,
             image_cache: HashMap::new(),
             scrollbar_state: ScrollbarState::default(),
         }
@@ -165,7 +167,7 @@ impl AlbumsState {
         self.img_cols = self.img_cols.max(14); // never narrower than 14 cols
 
         self.cell_stride_w = self.img_cols + GAP_W;
-        self.cell_stride_h = IMG_H + TEXT_H + GAP_H;
+        self.cell_stride_h = IMG_H + TEXT_PADDING + TEXT_H + GAP_H;
 
         // Reserve 1 col on the right for the scrollbar
         let grid_area = Rect { width: area.width.saturating_sub(1), ..area };
@@ -198,11 +200,21 @@ impl AlbumsState {
             )).collect()
         };
 
-        // Lazy-load images for visible albums (apply rounded corners before caching)
+        // Lazy-load images for visible albums.
+        // Pre-resize to exact pixel size so rounded corners land exactly at image edges.
+        let (fw, fh) = picker.font_size();
+        let target_px_w = (self.img_cols as u32) * (fw as u32);
+        let target_px_h = (IMG_H as u32) * (fh as u32);
         for (_, id, _, _, _, online, local) in &visible {
             if !self.image_cache.contains_key(id) {
                 let path = online.as_ref().or(local.as_ref());
                 if let Some(img) = path.and_then(|p| image::open(p).ok()) {
+                    // Resize to exact target pixel size (crop-to-fill from center)
+                    let img = img.resize_to_fill(
+                        target_px_w.max(1), target_px_h.max(1),
+                        image::imageops::FilterType::Lanczos3,
+                    );
+                    // Apply rounded corners now that image is at final size
                     let img = apply_rounded_corners(img);
                     self.image_cache.insert(*id, picker.new_resize_protocol(img));
                 }
@@ -224,7 +236,7 @@ impl AlbumsState {
             if x >= grid_area.x + grid_area.width || y >= grid_area.y + grid_area.height { continue; }
 
             let w = img_cols.min(grid_area.x + grid_area.width - x);
-            let h = (IMG_H + TEXT_H).min(grid_area.y + grid_area.height - y);
+            let h = (IMG_H + TEXT_PADDING + TEXT_H).min(grid_area.y + grid_area.height - y);
             let cell_rect = Rect { x, y, width: w, height: h };
 
             let is_sel = *flat_idx == self.selected;
@@ -261,8 +273,8 @@ fn render_cell(
     let img_h = IMG_H.min(area.height);
     let img_w = img_cols.min(area.width);
     let img_rect = Rect { width: img_w, height: img_h, ..area };
-    let text_y = area.y + img_h;
-    let text_h = area.height.saturating_sub(img_h);
+    let text_y = area.y + img_h + TEXT_PADDING;
+    let text_h = area.height.saturating_sub(img_h + TEXT_PADDING);
     let text_rect = Rect { y: text_y, height: text_h, width: img_w, x: area.x };
 
     if let Some(proto) = protocol {
