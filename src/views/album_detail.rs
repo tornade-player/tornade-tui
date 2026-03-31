@@ -1,9 +1,11 @@
 use ratatui::{
-    Frame, layout::{Constraint, Direction, Layout, Rect},
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
+use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use tornade_core::{models::{Album, Track}, services::LibraryService};
 use crate::utils::{format_duration, format_rating, truncate};
 
@@ -12,23 +14,29 @@ pub struct AlbumDetailState {
     pub tracks: Vec<Track>,
     pub list_state: ListState,
     pub skipped_ids: Vec<i64>,
+    image_state: Option<StatefulProtocol>,
+    scrollbar_state: ScrollbarState,
 }
 
 impl AlbumDetailState {
-    pub fn new(album: Album, library: &LibraryService) -> Self {
+    pub fn new(album: Album, library: &LibraryService, picker: &mut Picker) -> Self {
         let tracks = library.get_album_tracks(album.id).unwrap_or_default();
         let mut list_state = ListState::default();
         if !tracks.is_empty() { list_state.select(Some(0)); }
-        Self { album, tracks, list_state, skipped_ids: Vec::new() }
+
+        let image_state = album.online_artwork_path.as_ref()
+            .or(album.artwork_path.as_ref())
+            .and_then(|p| image::open(p).ok())
+            .map(|img| picker.new_resize_protocol(img));
+
+        Self { album, tracks, list_state, skipped_ids: Vec::new(), image_state, scrollbar_state: ScrollbarState::default() }
     }
 
     pub fn selected_track(&self) -> Option<&Track> {
         self.list_state.selected().and_then(|i| self.tracks.get(i))
     }
 
-    pub fn visible_track_ids(&self) -> Vec<i64> {
-        self.tracks.iter().map(|t| t.id).collect()
-    }
+    pub fn visible_track_ids(&self) -> Vec<i64> { self.tracks.iter().map(|t| t.id).collect() }
 
     pub fn move_down(&mut self) {
         let len = self.tracks.len();
@@ -43,32 +51,42 @@ impl AlbumDetailState {
     }
 
     pub fn jump_top(&mut self) { if !self.tracks.is_empty() { self.list_state.select(Some(0)); } }
-    pub fn jump_bottom(&mut self) { if !self.tracks.is_empty() { self.list_state.select(Some(self.tracks.len()-1)); } }
+    pub fn jump_bottom(&mut self) { if !self.tracks.is_empty() { self.list_state.select(Some(self.tracks.len() - 1)); } }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(5), Constraint::Min(0)])
+        // macOS-style layout: tracks (left ~68%) | artwork + About (right ~32%)
+        let right_w = (area.width * 32 / 100).max(24).min(40);
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(right_w)])
             .split(area);
 
-        // Header
-        let year = self.album.year.map(|y| format!(" · {}", y)).unwrap_or_default();
+        self.render_left(frame, h[0], focused);
+        self.render_right(frame, h[1]);
+    }
+
+    fn render_left(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        let year = self.album.year.map(|y| format!("  ·  {}", y)).unwrap_or_default();
+        let header_text = format!("{}{}", self.album.title, year);
+
+        let v = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)])
+            .split(area);
+
+        // Header: title + artist
         let header = Paragraph::new(vec![
             Line::from(Span::styled(
-                truncate(&self.album.title, 60),
+                truncate(&header_text, (area.width as usize).saturating_sub(4)),
                 Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
-                format!("{}{}", truncate(&self.album.artist_name, 40), year),
+                truncate(&self.album.artist_name, (area.width as usize).saturating_sub(4)),
                 Style::default().fg(Color::Gray),
             )),
-            Line::from(Span::styled(
-                format!("{} tracks", self.tracks.len()),
-                Style::default().fg(Color::DarkGray),
-            )),
         ])
-        .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(header, chunks[0]);
+        .block(Block::default().borders(Borders::TOP | Borders::LEFT | Borders::RIGHT));
+        frame.render_widget(header, v[0]);
 
         // Track list
         let items: Vec<ListItem> = self.tracks.iter().map(|t| {
@@ -78,7 +96,7 @@ impl AlbumDetailState {
             let rating = format_rating(t.rating.0);
             let line = Line::from(vec![
                 Span::styled(num, Style::default().fg(Color::DarkGray)),
-                Span::raw(format!("{:<40} ", truncate(&t.title, 39))),
+                Span::raw(format!("{:<38} ", truncate(&t.title, 37))),
                 Span::styled(format!("{:>5} ", dur), Style::default().fg(Color::DarkGray)),
                 Span::styled(rating, Style::default().fg(Color::Yellow)),
             ]);
@@ -92,9 +110,83 @@ impl AlbumDetailState {
             (Style::default().fg(Color::DarkGray), "  ")
         };
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Tracks "))
+            .block(Block::default().borders(Borders::ALL).title(format!(" {} tracks ", self.tracks.len())))
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
-        frame.render_stateful_widget(list, chunks[1], &mut self.list_state);
+        frame.render_stateful_widget(list, v[1], &mut self.list_state);
+
+        let pos = self.list_state.selected().unwrap_or(0);
+        self.scrollbar_state = ScrollbarState::new(self.tracks.len()).position(pos);
+        frame.render_stateful_widget(
+            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+            v[1],
+            &mut self.scrollbar_state,
+        );
+    }
+
+    fn render_right(&mut self, frame: &mut Frame, area: Rect) {
+        // Image: square occupying the top portion, About section below
+        let img_size = area.width.min(area.height / 2 + 4);
+        let about_rows = self.about_row_count() as u16 + 2; // +2 for block borders
+        let img_h = if area.height > about_rows { (area.height - about_rows).min(img_size) } else { 0 };
+
+        let v = Layout::vertical([Constraint::Length(img_h), Constraint::Min(0)]).split(area);
+
+        // Image
+        if img_h > 0 {
+            if let Some(ref mut proto) = self.image_state {
+                let block = Block::default().borders(Borders::ALL);
+                let inner = block.inner(v[0]);
+                frame.render_widget(block, v[0]);
+                frame.render_stateful_widget(StatefulImage::new(), inner, proto);
+            } else {
+                frame.render_widget(Block::default().borders(Borders::ALL), v[0]);
+            }
+        }
+
+        // About section
+        let mut lines = vec![
+            Line::from(Span::styled("About", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+            Line::from(""),
+        ];
+        self.push_info_row(&mut lines, "Artist", &self.album.artist_name.clone());
+        if let Some(y) = self.album.year {
+            self.push_info_row(&mut lines, "Year", &y.to_string());
+        }
+        self.push_info_row(&mut lines, "Tracks", &self.tracks.len().to_string());
+        if let Some(ref t) = self.album.album_type.clone() {
+            self.push_info_row(&mut lines, "Type", t);
+        }
+        if let Some(ref s) = self.album.release_status.clone() {
+            self.push_info_row(&mut lines, "Status", s);
+        }
+        if let Some(ref l) = self.album.label.clone() {
+            self.push_info_row(&mut lines, "Label", l);
+        }
+        if let Some(ref c) = self.album.country.clone() {
+            self.push_info_row(&mut lines, "Country", c);
+        }
+
+        let about = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title(" About "));
+        frame.render_widget(about, v[1]);
+    }
+
+    fn push_info_row<'a>(&self, lines: &mut Vec<Line<'a>>, label: &'static str, value: &str) {
+        let w = 28usize;
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<8}", label), Style::default().fg(Color::DarkGray)),
+            Span::styled(truncate(value, w.saturating_sub(8)), Style::default().fg(Color::Gray)),
+        ]));
+    }
+
+    fn about_row_count(&self) -> usize {
+        let mut n = 4usize; // header + blank + artist + tracks
+        if self.album.year.is_some() { n += 1; }
+        if self.album.album_type.is_some() { n += 1; }
+        if self.album.release_status.is_some() { n += 1; }
+        if self.album.label.is_some() { n += 1; }
+        if self.album.country.is_some() { n += 1; }
+        n
     }
 }

@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use tornade_core::{models::Track, services::LibraryService};
 use crate::utils::{format_audio, format_duration, format_rating, truncate};
@@ -18,6 +18,7 @@ pub struct LibraryState {
     pub filter: String,
     pub filter_active: bool,
     pub skipped_ids: Vec<i64>,
+    scrollbar_state: ScrollbarState,
 }
 
 impl Default for LibraryState {
@@ -30,6 +31,7 @@ impl Default for LibraryState {
             filter: String::new(),
             filter_active: false,
             skipped_ids: Vec::new(),
+            scrollbar_state: ScrollbarState::default(),
         }
     }
 }
@@ -169,5 +171,13 @@ impl LibraryState {
             .highlight_symbol(hl_sym);
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
+
+        let visible_pos = self.list_state.selected().unwrap_or(0);
+        self.scrollbar_state = ScrollbarState::new(self.tracks.len()).position(visible_pos);
+        frame.render_stateful_widget(
+            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut self.scrollbar_state,
+        );
     }
 }

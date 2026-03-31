@@ -1,5 +1,5 @@
 use std::time::Duration;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use tornade_core::{
     models::RepeatMode,
     services::PlaybackState,
@@ -14,6 +14,24 @@ use crate::{
         AlbumDetailState, ArtistDetailState, GenreDetailState, PlaylistDetailState, SidebarEntry, View,
     },
 };
+
+/// Process a mouse event.
+pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
+    if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+        // Click on an album in the grid
+        let clicked_idx = if let View::Albums(s) = app.nav.current() {
+            s.album_at_pos(mouse.column, mouse.row)
+        } else {
+            None
+        };
+        if let Some(idx) = clicked_idx {
+            if let View::Albums(s) = app.nav.current_mut() {
+                s.selected = idx;
+            }
+            push_album_detail(app);
+        }
+    }
+}
 
 /// Process one key event. Returns `true` if the application should quit.
 pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
@@ -56,6 +74,15 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
     if key.code == KeyCode::Char('?') {
         app.show_help = true;
         return false;
+    }
+
+    // Digit shortcuts (1-5) navigate library views from any panel
+    if let KeyCode::Char(c @ '1'..='5') = key.code {
+        if let Some(entry) = SidebarEntry::from_digit(c as u8 - b'0') {
+            app.navigate_to(entry);
+            app.focused_panel = FocusedPanel::Content;
+            return false;
+        }
     }
 
     // Tab / Shift+Tab cycle panel focus forward / backward
@@ -221,6 +248,12 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Cursor movement ──
         KeyCode::Char('j') | KeyCode::Down => move_down(app),
         KeyCode::Char('k') | KeyCode::Up => move_up(app),
+        KeyCode::Char('h') | KeyCode::Left if matches!(app.nav.current(), View::Albums(_)) => {
+            if let View::Albums(s) = app.nav.current_mut() { s.move_left(); }
+        }
+        KeyCode::Char('l') | KeyCode::Right if matches!(app.nav.current(), View::Albums(_)) => {
+            if let View::Albums(s) = app.nav.current_mut() { s.move_right(); }
+        }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => page_down(app),
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => page_up(app),
         KeyCode::Char('g') => jump_top(app),
@@ -344,7 +377,8 @@ fn push_album_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        app.nav.push(View::AlbumDetail(AlbumDetailState::new(album, &app.library)));
+        let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+        app.nav.push(View::AlbumDetail(state));
     }
 }
 
@@ -354,7 +388,9 @@ fn push_artist_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(artist) = artist {
-        app.nav.push(View::ArtistDetail(ArtistDetailState::new(artist, &app.library)));
+        let photo_dir = app.paths.artist_photo_dir();
+        let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
+        app.nav.push(View::ArtistDetail(state));
     }
 }
 
@@ -384,7 +420,8 @@ fn push_album_from_artist(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        app.nav.push(View::AlbumDetail(AlbumDetailState::new(album, &app.library)));
+        let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+        app.nav.push(View::AlbumDetail(state));
     }
 }
 
@@ -398,12 +435,15 @@ fn handle_search_enter(app: &mut AppState) {
         SearchSection::Tracks => app.play_from_current_view(),
         SearchSection::Albums => {
             if let Some(album) = album {
-                app.nav.push(View::AlbumDetail(AlbumDetailState::new(album, &app.library)));
+                let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+                app.nav.push(View::AlbumDetail(state));
             }
         }
         SearchSection::Artists => {
             if let Some(artist) = artist {
-                app.nav.push(View::ArtistDetail(ArtistDetailState::new(artist, &app.library)));
+                let photo_dir = app.paths.artist_photo_dir();
+                let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
+                app.nav.push(View::ArtistDetail(state));
             }
         }
     }

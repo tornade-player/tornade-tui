@@ -1,15 +1,16 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState}};
+use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState}};
 use tornade_core::{models::Playlist, services::PlaylistService};
 use crate::utils::truncate;
 
 pub struct PlaylistsState {
     pub playlists: Vec<Playlist>,
     pub list_state: ListState,
+    scrollbar_state: ScrollbarState,
 }
 
 impl Default for PlaylistsState {
     fn default() -> Self {
-        Self { playlists: Vec::new(), list_state: ListState::default() }
+        Self { playlists: Vec::new(), list_state: ListState::default(), scrollbar_state: ScrollbarState::default() }
     }
 }
 
@@ -47,5 +48,13 @@ impl PlaylistsState {
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, area, &mut self.list_state);
+
+        let pos = self.list_state.selected().unwrap_or(0);
+        self.scrollbar_state = ScrollbarState::new(self.playlists.len()).position(pos);
+        frame.render_stateful_widget(
+            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut self.scrollbar_state,
+        );
     }
 }

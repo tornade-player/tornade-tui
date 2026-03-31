@@ -69,7 +69,7 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
     match app.nav.current_mut() {
         View::Library(s) => s.render(frame, area, focused),
-        View::Albums(s) => s.render(frame, area, focused),
+        View::Albums(s) => s.render(frame, area, focused, &mut app.picker),
         View::Artists(s) => s.render(frame, area, focused),
         View::Genres(s) => s.render(frame, area, focused),
         View::Playlists(s) => s.render(frame, area, focused),

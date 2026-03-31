@@ -1,7 +1,9 @@
 use std::time::Instant;
+use ratatui_image::picker::Picker;
 use tornade_core::{
     models::Track,
     services::{ArtworkService, LibraryService, PlaybackState, PlaylistService, PlayerService, SearchService},
+    utils::AppPaths,
 };
 use crate::{
     navigation::NavigationStack,
@@ -79,6 +81,8 @@ pub struct AppState {
     pub playlists: PlaylistService,
     pub search_svc: SearchService,
     pub artwork: ArtworkService,
+    pub paths: AppPaths,
+    pub picker: Picker,
 
     // Navigation
     pub nav: NavigationStack,
@@ -124,6 +128,8 @@ impl AppState {
         playlists: PlaylistService,
         search_svc: SearchService,
         artwork: ArtworkService,
+        paths: AppPaths,
+        picker: Picker,
     ) -> Self {
         let mut state = Self {
             player,
@@ -131,6 +137,8 @@ impl AppState {
             playlists,
             search_svc,
             artwork,
+            paths,
+            picker,
             nav: NavigationStack::new(View::Library(LibraryState::default())),
             sidebar_entry: SidebarEntry::Tracks,
             player_cache: PlayerStateCache::default(),

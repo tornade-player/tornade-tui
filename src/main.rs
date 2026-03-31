@@ -8,6 +8,7 @@ use ratatui::crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use ratatui_image::picker::Picker;
 use tornade_core::{
     db,
     services::{ArtworkService, LibraryService, PlaylistService, PlayerService, SearchService},
@@ -39,10 +40,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let player = PlayerService::new(pool.clone())?;
     let playlists = PlaylistService::new(pool.clone());
     let search_svc = SearchService::new(pool.clone());
-    let artwork = ArtworkService::new(pool.clone(), paths);
+    let artwork = ArtworkService::new(pool.clone(), paths.clone());
+
+    // Detect terminal image protocol before entering raw mode
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
 
     // Build application state
-    let mut app = AppState::new(player, library, playlists, search_svc, artwork);
+    let mut app = AppState::new(player, library, playlists, search_svc, artwork, paths, picker);
 
     // Setup terminal
     enable_raw_mode()?;
@@ -94,6 +98,10 @@ fn run_loop(
                     if events::handle_key(app, key) {
                         return Ok(());
                     }
+                    needs_redraw = true;
+                }
+                Event::Mouse(mouse) => {
+                    events::handle_mouse(app, mouse);
                     needs_redraw = true;
                 }
                 Event::Resize(_, _) => {

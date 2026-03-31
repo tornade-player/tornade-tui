@@ -1,15 +1,16 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState}};
+use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState}};
 use tornade_core::{models::Genre, services::LibraryService};
 use crate::utils::truncate;
 
 pub struct GenresState {
     pub genres: Vec<(Genre, u32, u32)>,
     pub list_state: ListState,
+    scrollbar_state: ScrollbarState,
 }
 
 impl Default for GenresState {
     fn default() -> Self {
-        Self { genres: Vec::new(), list_state: ListState::default() }
+        Self { genres: Vec::new(), list_state: ListState::default(), scrollbar_state: ScrollbarState::default() }
     }
 }
 
@@ -48,5 +49,13 @@ impl GenresState {
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, area, &mut self.list_state);
+
+        let pos = self.list_state.selected().unwrap_or(0);
+        self.scrollbar_state = ScrollbarState::new(self.genres.len()).position(pos);
+        frame.render_stateful_widget(
+            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut self.scrollbar_state,
+        );
     }
 }
