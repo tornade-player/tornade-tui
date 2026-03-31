@@ -20,6 +20,10 @@ const TEXT_PADDING: u16 = 1;
 // Gap between cells (cols/rows)
 const GAP_W: u16 = 3;
 const GAP_H: u16 = 2;
+// Left/right padding inside the grid area
+const GRID_PAD: u16 = 1;
+// Max images to load (resize+encode) per render frame to avoid CPU spikes
+const MAX_LOADS_PER_FRAME: usize = 3;
 // Corner radius as fraction of the shorter image dimension
 const CORNER_RADIUS_FRAC: f32 = 0.12;
 
@@ -169,8 +173,12 @@ impl AlbumsState {
         self.cell_stride_w = self.img_cols + GAP_W;
         self.cell_stride_h = IMG_H + TEXT_PADDING + TEXT_H + GAP_H;
 
-        // Reserve 1 col on the right for the scrollbar
-        let grid_area = Rect { width: area.width.saturating_sub(1), ..area };
+        // Left/right padding + 1 col on the right for the scrollbar
+        let grid_area = Rect {
+            x: area.x + GRID_PAD,
+            width: area.width.saturating_sub(GRID_PAD * 2 + 1),
+            ..area
+        };
         self.last_grid_area = grid_area;
 
         self.cols = ((grid_area.width / self.cell_stride_w) as usize).max(1);
@@ -202,21 +210,24 @@ impl AlbumsState {
 
         // Lazy-load images for visible albums.
         // Pre-resize to exact pixel size so rounded corners land exactly at image edges.
+        // Use Triangle (bilinear) filter: ~10x faster than Lanczos3, adequate for thumbnails.
+        // Limit to MAX_LOADS_PER_FRAME per render to avoid CPU spikes on first paint.
         let (fw, fh) = picker.font_size();
         let target_px_w = (self.img_cols as u32) * (fw as u32);
         let target_px_h = (IMG_H as u32) * (fh as u32);
+        let mut loads_this_frame = 0;
         for (_, id, _, _, _, online, local) in &visible {
+            if loads_this_frame >= MAX_LOADS_PER_FRAME { break; }
             if !self.image_cache.contains_key(id) {
                 let path = online.as_ref().or(local.as_ref());
                 if let Some(img) = path.and_then(|p| image::open(p).ok()) {
-                    // Resize to exact target pixel size (crop-to-fill from center)
                     let img = img.resize_to_fill(
                         target_px_w.max(1), target_px_h.max(1),
-                        image::imageops::FilterType::Lanczos3,
+                        image::imageops::FilterType::Triangle,
                     );
-                    // Apply rounded corners now that image is at final size
                     let img = apply_rounded_corners(img);
                     self.image_cache.insert(*id, picker.new_resize_protocol(img));
+                    loads_this_frame += 1;
                 }
             }
         }

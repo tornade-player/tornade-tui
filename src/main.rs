@@ -101,8 +101,12 @@ fn run_loop(
                     needs_redraw = true;
                 }
                 Event::Mouse(mouse) => {
-                    events::handle_mouse(app, mouse);
-                    needs_redraw = true;
+                    // Only redraw on clicks, not mouse moves (moves fire constantly and are expensive)
+                    use ratatui::crossterm::event::MouseEventKind;
+                    if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
+                        events::handle_mouse(app, mouse);
+                        needs_redraw = true;
+                    }
                 }
                 Event::Resize(_, _) => {
                     needs_redraw = true;
