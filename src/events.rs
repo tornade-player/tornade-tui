@@ -17,19 +17,32 @@ use crate::{
 
 /// Process a mouse event.
 pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
-    if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-        // Click on an album in the grid
-        let clicked_idx = if let View::Albums(s) = app.nav.current() {
-            s.album_at_pos(mouse.column, mouse.row)
-        } else {
-            None
-        };
-        if let Some(idx) = clicked_idx {
-            if let View::Albums(s) = app.nav.current_mut() {
-                s.selected = idx;
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            // Click on an album in the grid
+            let clicked_idx = if let View::Albums(s) = app.nav.current() {
+                s.album_at_pos(mouse.column, mouse.row)
+            } else {
+                None
+            };
+            if let Some(idx) = clicked_idx {
+                if let View::Albums(s) = app.nav.current_mut() {
+                    s.selected = idx;
+                }
+                push_album_detail(app);
             }
-            push_album_detail(app);
         }
+        MouseEventKind::ScrollDown => scroll_content(app, 1),
+        MouseEventKind::ScrollUp => scroll_content(app, -1),
+        _ => {}
+    }
+}
+
+fn scroll_content(app: &mut AppState, delta: i32) {
+    if delta > 0 {
+        move_down(app);
+    } else {
+        move_up(app);
     }
 }
 

@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, List, ListItem},
 };
 use crate::utils::truncate;
 use crate::views::SidebarEntry;
@@ -26,8 +26,8 @@ pub fn render(
     cursor: usize,
     playlists: &[(i64, String)],
 ) {
-    // inner width (minus borders) for label truncation
-    let label_w = (area.width as usize).saturating_sub(4); // 2 borders + 3 indent
+    // inner width for label truncation (no borders)
+    let label_w = (area.width as usize).saturating_sub(3); // 3 indent chars
 
     let mut items: Vec<ListItem> = Vec::new();
     let mut sel_idx: usize = 0;
@@ -60,17 +60,10 @@ pub fn render(
         }
     }
 
-    let border_style = if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default()
-    };
-
+    // Slightly darker background than the terminal default, no border, no title
+    let bg = Color::Rgb(28, 30, 38);
     let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Tornade ")
-            .border_style(border_style),
+        Block::default().style(Style::default().bg(bg)),
     );
     frame.render_widget(list, area);
 }
