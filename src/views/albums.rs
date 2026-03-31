@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use image::Rgba;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -10,10 +11,15 @@ use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulPro
 use tornade_core::{models::Album, services::LibraryService};
 use crate::utils::truncate;
 
-const CELL_W: u16 = 22;
-// 12 rows image (no border) + 3 rows text
-const CELL_H: u16 = 15;
+// Image height in terminal rows (fixed); width is computed from font metrics to make it square
 const IMG_H: u16 = 12;
+// Text rows below the image
+const TEXT_H: u16 = 3;
+// Gap between cells (cols/rows)
+const GAP_W: u16 = 1;
+const GAP_H: u16 = 1;
+// Corner radius as fraction of the shorter image dimension
+const CORNER_RADIUS_FRAC: f32 = 0.08;
 
 pub struct AlbumsState {
     pub albums: Vec<Album>,
@@ -23,6 +29,10 @@ pub struct AlbumsState {
     pub scroll_row: usize,
     pub cols: usize,
     pub last_grid_area: Rect,
+    // computed each render, stored for click detection between renders
+    img_cols: u16,
+    cell_stride_w: u16,
+    cell_stride_h: u16,
     image_cache: HashMap<i64, StatefulProtocol>,
     scrollbar_state: ScrollbarState,
 }
@@ -37,10 +47,39 @@ impl Default for AlbumsState {
             scroll_row: 0,
             cols: 4,
             last_grid_area: Rect::default(),
+            img_cols: IMG_H, // sensible default before first render
+            cell_stride_w: IMG_H + GAP_W,
+            cell_stride_h: IMG_H + TEXT_H + GAP_H,
             image_cache: HashMap::new(),
             scrollbar_state: ScrollbarState::default(),
         }
     }
+}
+
+/// Apply rounded corners to an image by zeroing alpha in corner regions.
+fn apply_rounded_corners(img: image::DynamicImage) -> image::DynamicImage {
+    let (w, h) = (img.width(), img.height());
+    let mut rgba = img.into_rgba8();
+    let r = (w.min(h) as f32 * CORNER_RADIUS_FRAC).max(1.0);
+    let fw = w as f32;
+    let fh = h as f32;
+    for y in 0..h {
+        for x in 0..w {
+            let fx = x as f32;
+            let fy = y as f32;
+            // Distance from each corner's arc center; transparent if outside the arc
+            let in_corner =
+                (fx < r && fy < r && (fx - r).hypot(fy - r) > r) ||
+                (fx > fw - r - 1.0 && fy < r && (fx - (fw - r - 1.0)).hypot(fy - r) > r) ||
+                (fx < r && fy > fh - r - 1.0 && (fx - r).hypot(fy - (fh - r - 1.0)) > r) ||
+                (fx > fw - r - 1.0 && fy > fh - r - 1.0 &&
+                    (fx - (fw - r - 1.0)).hypot(fy - (fh - r - 1.0)) > r);
+            if in_corner {
+                rgba.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+            }
+        }
+    }
+    image::DynamicImage::ImageRgba8(rgba)
 }
 
 impl AlbumsState {
@@ -69,8 +108,8 @@ impl AlbumsState {
         if a.width == 0 || x < a.x || y < a.y || x >= a.x + a.width || y >= a.y + a.height {
             return None;
         }
-        let col = ((x - a.x) / CELL_W) as usize;
-        let row_in_view = ((y - a.y) / CELL_H) as usize;
+        let col = ((x - a.x) / self.cell_stride_w) as usize;
+        let row_in_view = ((y - a.y) / self.cell_stride_h) as usize;
         if col >= self.cols { return None; }
         let row = self.scroll_row + row_in_view;
         let idx = row * self.cols + col;
@@ -115,13 +154,25 @@ impl AlbumsState {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) {
+        // Compute square image width from font metrics
+        // font_size() = (cell_width_px, cell_height_px)
+        let font = picker.font_size();
+        self.img_cols = if font.0 > 0 {
+            ((IMG_H as u32 * font.1 as u32) / font.0 as u32) as u16
+        } else {
+            IMG_H
+        };
+        self.img_cols = self.img_cols.max(14); // never narrower than 14 cols
+
+        self.cell_stride_w = self.img_cols + GAP_W;
+        self.cell_stride_h = IMG_H + TEXT_H + GAP_H;
+
         // Reserve 1 col on the right for the scrollbar
-        let inner_w = area.width.saturating_sub(1);
-        let grid_area = Rect { width: inner_w, ..area };
+        let grid_area = Rect { width: area.width.saturating_sub(1), ..area };
         self.last_grid_area = grid_area;
 
-        self.cols = ((grid_area.width / CELL_W) as usize).max(1);
-        let rows_visible = ((grid_area.height / CELL_H) as usize).max(1);
+        self.cols = ((grid_area.width / self.cell_stride_w) as usize).max(1);
+        let rows_visible = ((grid_area.height / self.cell_stride_h) as usize).max(1);
 
         let total = self.filtered_albums().len();
         if total > 0 && self.selected >= total { self.selected = total - 1; }
@@ -137,7 +188,9 @@ impl AlbumsState {
         let end = ((self.scroll_row + rows_visible) * self.cols).min(total);
 
         // Collect visible album data (owned) to release the immutable borrow
-        let visible: Vec<(usize, i64, String, String, Option<u16>, Option<std::path::PathBuf>, Option<std::path::PathBuf>)> = {
+        type AlbumTuple = (usize, i64, String, String, Option<u16>,
+                           Option<std::path::PathBuf>, Option<std::path::PathBuf>);
+        let visible: Vec<AlbumTuple> = {
             let filtered = self.filtered_albums();
             filtered[start..end].iter().enumerate().map(|(i, a)| (
                 start + i, a.id, a.title.clone(), a.artist_name.clone(), a.year,
@@ -145,15 +198,20 @@ impl AlbumsState {
             )).collect()
         };
 
-        // Lazy-load images for visible albums
+        // Lazy-load images for visible albums (apply rounded corners before caching)
         for (_, id, _, _, _, online, local) in &visible {
             if !self.image_cache.contains_key(id) {
                 let path = online.as_ref().or(local.as_ref());
                 if let Some(img) = path.and_then(|p| image::open(p).ok()) {
+                    let img = apply_rounded_corners(img);
                     self.image_cache.insert(*id, picker.new_resize_protocol(img));
                 }
             }
         }
+
+        let img_cols = self.img_cols;
+        let cell_stride_w = self.cell_stride_w;
+        let cell_stride_h = self.cell_stride_h;
 
         // Render cells
         for (flat_idx, id, title, artist, year, _, _) in &visible {
@@ -161,20 +219,20 @@ impl AlbumsState {
             let col = flat_idx % self.cols;
             if row >= self.scroll_row + rows_visible || row >= total_rows { continue; }
 
-            let x = grid_area.x + (col as u16) * CELL_W;
-            let y = grid_area.y + ((row - self.scroll_row) as u16) * CELL_H;
+            let x = grid_area.x + (col as u16) * cell_stride_w;
+            let y = grid_area.y + ((row - self.scroll_row) as u16) * cell_stride_h;
             if x >= grid_area.x + grid_area.width || y >= grid_area.y + grid_area.height { continue; }
 
-            let w = CELL_W.min(grid_area.x + grid_area.width - x);
-            let h = CELL_H.min(grid_area.y + grid_area.height - y);
+            let w = img_cols.min(grid_area.x + grid_area.width - x);
+            let h = (IMG_H + TEXT_H).min(grid_area.y + grid_area.height - y);
             let cell_rect = Rect { x, y, width: w, height: h };
 
             let is_sel = *flat_idx == self.selected;
             let protocol = self.image_cache.get_mut(id);
-            render_cell(frame, cell_rect, title, artist, *year, is_sel, focused, protocol);
+            render_cell(frame, cell_rect, title, artist, *year, is_sel, focused, protocol, img_cols);
         }
 
-        // Scrollbar (1 col strip on the right)
+        // Scrollbar
         self.scrollbar_state = ScrollbarState::new(total_rows).position(self.scroll_row);
         let scrollbar_area = Rect {
             x: area.x + area.width.saturating_sub(1),
@@ -198,24 +256,26 @@ fn render_cell(
     is_selected: bool,
     focused: bool,
     protocol: Option<&mut StatefulProtocol>,
+    img_cols: u16,
 ) {
-    let img_rect = Rect { height: IMG_H.min(area.height), ..area };
-    let text_y = area.y + img_rect.height;
-    let text_h = area.height.saturating_sub(img_rect.height);
-    let text_rect = Rect { y: text_y, height: text_h, ..area };
+    let img_h = IMG_H.min(area.height);
+    let img_w = img_cols.min(area.width);
+    let img_rect = Rect { width: img_w, height: img_h, ..area };
+    let text_y = area.y + img_h;
+    let text_h = area.height.saturating_sub(img_h);
+    let text_rect = Rect { y: text_y, height: text_h, width: img_w, x: area.x };
 
-    // Image - rendered directly, no border/block
     if let Some(proto) = protocol {
-        frame.render_stateful_widget(StatefulImage::new().resize(Resize::Crop(None)), img_rect, proto);
+        frame.render_stateful_widget(
+            StatefulImage::new().resize(Resize::Crop(None)),
+            img_rect,
+            proto,
+        );
     } else {
-        // Placeholder block (no border, just dark bg)
-        frame.render_widget(Block::default().style(Style::default().bg(Color::DarkGray)), img_rect);
-    }
-
-    // Selection indicator: cyan top border on image when selected + focused
-    if is_selected && focused {
-        // Draw a 1-row highlight above the image (if room)
-        // Instead, highlight the text title
+        frame.render_widget(
+            Block::default().style(Style::default().bg(Color::DarkGray)),
+            img_rect,
+        );
     }
 
     if text_rect.height == 0 { return; }
@@ -225,7 +285,7 @@ fn render_cell(
     } else {
         Style::default().fg(Color::Gray)
     };
-    let max_w = area.width as usize;
+    let max_w = img_w as usize;
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled(truncate(title, max_w), title_style)),
