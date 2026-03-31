@@ -73,7 +73,7 @@ impl SearchState {
     pub fn selected_album(&self) -> Option<&Album> { self.albums_state.selected().and_then(|i| self.albums.get(i)) }
     pub fn selected_artist(&self) -> Option<&Artist> { self.artists_state.selected().and_then(|i| self.artists.get(i)) }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let chunks = Layout::default().direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Ratio(1,3), Constraint::Ratio(1,3), Constraint::Ratio(1,3)])
             .split(area);
@@ -84,14 +84,19 @@ impl SearchState {
         ])).block(Block::default().borders(Borders::ALL).title(" Search  [Tab switch section] "));
         frame.render_widget(query_bar, chunks[0]);
 
-        self.render_section(frame, chunks[1], SearchSection::Tracks);
-        self.render_section(frame, chunks[2], SearchSection::Albums);
-        self.render_section(frame, chunks[3], SearchSection::Artists);
+        self.render_section(frame, chunks[1], SearchSection::Tracks, focused);
+        self.render_section(frame, chunks[2], SearchSection::Albums, focused);
+        self.render_section(frame, chunks[3], SearchSection::Artists, focused);
     }
 
-    fn render_section(&mut self, frame: &mut Frame, area: Rect, section: SearchSection) {
+    fn render_section(&mut self, frame: &mut Frame, area: Rect, section: SearchSection, focused: bool) {
         let is_active = self.section == section;
         let border_style = if is_active { Style::default().fg(Color::Cyan) } else { Style::default() };
+        let (hl_style, hl_sym) = if focused && is_active {
+            (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
+        } else {
+            (Style::default().fg(Color::DarkGray), "  ")
+        };
         match section {
             SearchSection::Tracks => {
                 let items: Vec<ListItem> = self.tracks.iter().map(|t| {
@@ -104,8 +109,8 @@ impl SearchState {
                 }).collect();
                 let list = List::new(items)
                     .block(Block::default().borders(Borders::ALL).title(format!(" Tracks ({}) ", self.tracks.len())).border_style(border_style))
-                    .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
-                    .highlight_symbol("> ");
+                    .highlight_style(hl_style)
+                    .highlight_symbol(hl_sym);
                 frame.render_stateful_widget(list, area, &mut self.tracks_state);
             }
             SearchSection::Albums => {
@@ -117,8 +122,8 @@ impl SearchState {
                 }).collect();
                 let list = List::new(items)
                     .block(Block::default().borders(Borders::ALL).title(format!(" Albums ({}) ", self.albums.len())).border_style(border_style))
-                    .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
-                    .highlight_symbol("> ");
+                    .highlight_style(hl_style)
+                    .highlight_symbol(hl_sym);
                 frame.render_stateful_widget(list, area, &mut self.albums_state);
             }
             SearchSection::Artists => {
@@ -127,8 +132,8 @@ impl SearchState {
                 }).collect();
                 let list = List::new(items)
                     .block(Block::default().borders(Borders::ALL).title(format!(" Artists ({}) ", self.artists.len())).border_style(border_style))
-                    .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
-                    .highlight_symbol("> ");
+                    .highlight_style(hl_style)
+                    .highlight_symbol(hl_sym);
                 frame.render_stateful_widget(list, area, &mut self.artists_state);
             }
         }

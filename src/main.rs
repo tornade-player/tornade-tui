@@ -74,17 +74,39 @@ fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut AppState,
 ) -> io::Result<()> {
-    loop {
-        terminal.draw(|f| ui::draw(f, app))?;
+    use std::time::Instant;
 
-        if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                if events::handle_key(app, key) {
-                    return Ok(());
+    let tick_rate = Duration::from_millis(500);
+    let mut last_tick = Instant::now();
+    let mut needs_redraw = true;
+
+    loop {
+        if needs_redraw {
+            terminal.draw(|f| ui::draw(f, app))?;
+            needs_redraw = false;
+        }
+
+        // Poll only for the time remaining until next tick
+        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if events::handle_key(app, key) {
+                        return Ok(());
+                    }
+                    needs_redraw = true;
                 }
+                Event::Resize(_, _) => {
+                    needs_redraw = true;
+                }
+                _ => {}
             }
         }
 
-        app.tick();
+        if last_tick.elapsed() >= tick_rate {
+            app.tick();
+            needs_redraw = true; // progress bar + player state may have changed
+            last_tick = Instant::now();
+        }
     }
 }

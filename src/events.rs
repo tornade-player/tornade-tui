@@ -6,7 +6,7 @@ use tornade_core::{
 };
 
 use crate::{
-    app::{AppState, ConfirmAction, ConfirmCtx, InputMode, StatusKind, TextInputAction, TextInputCtx},
+    app::{AppState, ConfirmAction, ConfirmCtx, FocusedPanel, InputMode, StatusKind, TextInputAction, TextInputCtx},
     commands::{Command, completions},
     player::parse_seek_position,
     utils::expand_tilde,
@@ -43,25 +43,160 @@ pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
 // ── Normal mode ──────────────────────────────────────────────────────────────
 
 fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
-    // Help overlay intercepts everything except ESC/?
     if app.show_help {
-        match key.code {
-            KeyCode::Char('?') | KeyCode::Esc => app.show_help = false,
-            _ => {}
-        }
+        if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) { app.show_help = false; }
         return false;
     }
 
-    // Playlist selector overlay
     if app.show_playlist_selector {
         return handle_playlist_selector(app, key);
     }
 
+    // ? toggles help from any panel
+    if key.code == KeyCode::Char('?') {
+        app.show_help = true;
+        return false;
+    }
+
+    // Tab / Shift+Tab cycle panel focus forward / backward
+    if key.code == KeyCode::Tab {
+        app.cycle_focus();
+        return false;
+    }
+    if key.code == KeyCode::BackTab {
+        app.cycle_focus_reverse();
+        return false;
+    }
+
+    match app.focused_panel {
+        FocusedPanel::Sidebar => handle_sidebar_focus(app, key),
+        FocusedPanel::RightPanel => handle_right_panel_focus(app, key),
+        FocusedPanel::Content => handle_content_focus(app, key),
+    }
+}
+
+fn handle_sidebar_focus(app: &mut AppState, key: KeyEvent) -> bool {
+    let library_len = SidebarEntry::all().len(); // 5
+    let total = library_len + app.sidebar_playlists.len();
+    match key.code {
+        KeyCode::Esc => app.focused_panel = FocusedPanel::Content,
+        KeyCode::Char('j') | KeyCode::Down => {
+            if total > 0 { app.sidebar_cursor = (app.sidebar_cursor + 1).min(total - 1); }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.sidebar_cursor = app.sidebar_cursor.saturating_sub(1);
+        }
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+            if app.sidebar_cursor < library_len {
+                if let Some(&entry) = SidebarEntry::all().get(app.sidebar_cursor) {
+                    app.navigate_to(entry);
+                    app.focused_panel = FocusedPanel::Content;
+                }
+            } else {
+                let playlist_idx = app.sidebar_cursor - library_len;
+                if let Some(&(id, _)) = app.sidebar_playlists.get(playlist_idx) {
+                    app.navigate_to_playlist(id);
+                    app.focused_panel = FocusedPanel::Content;
+                }
+            }
+        }
+        // Digit shortcuts (1-5) navigate library items and return focus to content
+        KeyCode::Char(c @ '1'..='5') => {
+            if let Some(entry) = SidebarEntry::from_digit(c as u8 - b'0') {
+                app.navigate_to(entry);
+                app.focused_panel = FocusedPanel::Content;
+            }
+        }
+        // Playback controls work from any panel
+        KeyCode::Char(' ') => toggle_playback(app),
+        KeyCode::Char('n') => { let _ = app.player.next(); }
+        KeyCode::Char('N') => { let _ = app.player.previous(); }
+        KeyCode::Char('+') | KeyCode::Char('=') => {
+            let _ = app.player.set_volume((app.player_cache.volume + 0.05).min(1.0));
+        }
+        KeyCode::Char('-') => {
+            let _ = app.player.set_volume((app.player_cache.volume - 0.05).max(0.0));
+        }
+        KeyCode::Char('S') => { let _ = app.player.set_shuffle(!app.player_cache.shuffle); }
+        KeyCode::Char('R') => {
+            let next = match app.player_cache.repeat {
+                RepeatMode::Off => RepeatMode::All,
+                RepeatMode::All => RepeatMode::One,
+                RepeatMode::One => RepeatMode::Off,
+            };
+            let _ = app.player.set_repeat(next);
+        }
+        KeyCode::Char('q') => return true,
+        _ => {}
+    }
+    false
+}
+
+fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
+    let queue_len = app.cached_queue_tracks.len();
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
+            app.focused_panel = FocusedPanel::Content;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            if queue_len > 0 {
+                let next = app.right_panel_queue_state.selected()
+                    .map(|i| (i + 1).min(queue_len - 1))
+                    .unwrap_or(0);
+                app.right_panel_queue_state.select(Some(next));
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            let prev = app.right_panel_queue_state.selected()
+                .map(|i| i.saturating_sub(1))
+                .unwrap_or(0);
+            if queue_len > 0 { app.right_panel_queue_state.select(Some(prev)); }
+        }
+        KeyCode::Char('g') => {
+            if queue_len > 0 { app.right_panel_queue_state.select(Some(0)); }
+        }
+        KeyCode::Char('G') => {
+            if queue_len > 0 { app.right_panel_queue_state.select(Some(queue_len - 1)); }
+        }
+        KeyCode::Enter => {
+            if let Some(idx) = app.right_panel_queue_state.selected() {
+                let _ = app.player.jump_to_index(idx);
+                if app.player_cache.state != PlaybackState::Playing {
+                    let _ = app.player.resume();
+                }
+            }
+        }
+        // Playback controls work from any panel
+        KeyCode::Char(' ') => toggle_playback(app),
+        KeyCode::Char('n') => { let _ = app.player.next(); }
+        KeyCode::Char('N') => { let _ = app.player.previous(); }
+        KeyCode::Char('+') | KeyCode::Char('=') => {
+            let _ = app.player.set_volume((app.player_cache.volume + 0.05).min(1.0));
+        }
+        KeyCode::Char('-') => {
+            let _ = app.player.set_volume((app.player_cache.volume - 0.05).max(0.0));
+        }
+        KeyCode::Char('S') => { let _ = app.player.set_shuffle(!app.player_cache.shuffle); }
+        KeyCode::Char('R') => {
+            let next = match app.player_cache.repeat {
+                RepeatMode::Off => RepeatMode::All,
+                RepeatMode::All => RepeatMode::One,
+                RepeatMode::One => RepeatMode::Off,
+            };
+            let _ = app.player.set_repeat(next);
+        }
+        KeyCode::Char('q') => return true,
+        _ => {}
+    }
+    false
+}
+
+fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
     match key.code {
         // ── Quit / back ──
         KeyCode::Char('q') | KeyCode::Esc => {
             if app.nav.is_root() {
-                return true; // quit from root
+                return true;
             }
             app.nav.pop();
         }
@@ -76,8 +211,8 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
             app.command_completions = completions::complete("");
         }
 
-        // ── Sidebar navigation (1-7) ──
-        KeyCode::Char(c @ '1'..='7') => {
+        // ── Sidebar navigation (1-5) ──
+        KeyCode::Char(c @ '1'..='5') => {
             if let Some(entry) = SidebarEntry::from_digit(c as u8 - b'0') {
                 app.navigate_to(entry);
             }
@@ -99,21 +234,14 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Char('n') => { let _ = app.player.next(); }
         KeyCode::Char('N') => { let _ = app.player.previous(); }
         KeyCode::Char(']') => { let _ = app.player.seek(Duration::from_secs(10)); }
-        KeyCode::Char('[') => { let _ = app.player.seek(Duration::from_secs(0).saturating_add(
-            Duration::from_secs_f64((app.player_cache.position - 10.0).max(0.0))
-        )); }
+        KeyCode::Char('[') => { let _ = app.player.seek(Duration::from_secs_f64((app.player_cache.position - 10.0).max(0.0))); }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            let vol = (app.player_cache.volume + 0.05).min(1.0);
-            let _ = app.player.set_volume(vol);
+            let _ = app.player.set_volume((app.player_cache.volume + 0.05).min(1.0));
         }
         KeyCode::Char('-') => {
-            let vol = (app.player_cache.volume - 0.05).max(0.0);
-            let _ = app.player.set_volume(vol);
+            let _ = app.player.set_volume((app.player_cache.volume - 0.05).max(0.0));
         }
-        KeyCode::Char('S') => {
-            let new_shuffle = !app.player_cache.shuffle;
-            let _ = app.player.set_shuffle(new_shuffle);
-        }
+        KeyCode::Char('S') => { let _ = app.player.set_shuffle(!app.player_cache.shuffle); }
         KeyCode::Char('R') => {
             let next = match app.player_cache.repeat {
                 RepeatMode::Off => RepeatMode::All,
@@ -159,13 +287,7 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
             app.rate_selected(c as u8 - b'0');
         }
 
-        // ── Search: Tab switches section, typing enters query ──
-        KeyCode::Tab => {
-            if let View::Search(s) = app.nav.current_mut() {
-                s.next_section();
-            }
-        }
-        // In search view, typing characters updates the query
+        // ── Search: typing characters updates the query ──
         KeyCode::Char(c) if matches!(app.nav.current(), View::Search(_)) => {
             if let View::Search(s) = app.nav.current_mut() {
                 s.query.push(c);

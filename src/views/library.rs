@@ -105,7 +105,7 @@ impl LibraryState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         if self.total_count == 0 && self.filter.is_empty() {
             let msg = Paragraph::new(vec![
                 Line::from(""),
@@ -158,10 +158,15 @@ impl LibraryState {
             ListItem::new(line).style(style)
         }).collect();
 
+        let (hl_style, hl_sym) = if focused {
+            (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
+        } else {
+            (Style::default().fg(Color::DarkGray), "  ")
+        };
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(title))
-            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
-            .highlight_symbol("> ");
+            .highlight_style(hl_style)
+            .highlight_symbol(hl_sym);
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }

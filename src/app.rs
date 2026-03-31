@@ -1,5 +1,6 @@
 use std::time::Instant;
 use tornade_core::{
+    models::Track,
     services::{ArtworkService, LibraryService, PlaybackState, PlaylistService, PlayerService, SearchService},
 };
 use crate::{
@@ -7,9 +8,18 @@ use crate::{
     player::PlayerStateCache,
     views::{
         View, SidebarEntry,
-        LibraryState, AlbumsState, ArtistsState, GenresState, PlaylistsState, QueueState, SearchState,
+        LibraryState, AlbumsState, ArtistsState, GenresState, PlaylistsState,
+        PlaylistDetailState, QueueState, SearchState,
     },
 };
+
+/// Which of the three panels currently has keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedPanel {
+    Sidebar,
+    Content,
+    RightPanel,
+}
 
 /// Current keyboard input mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +99,20 @@ pub struct AppState {
     pub show_playlist_selector: bool,
     pub playlist_selector_state: ratatui::widgets::ListState,
 
+    // Panel focus
+    pub focused_panel: FocusedPanel,
+    pub sidebar_cursor: usize,
+
+    // Right panel queue scroll state (persists across frames for smooth scrolling)
+    pub right_panel_queue_state: ratatui::widgets::ListState,
+
+    // Queue track cache: resolved once when queue IDs change, not on every frame
+    pub cached_queue_tracks: Vec<Track>,
+    cached_queue_ids: Vec<i64>,
+
+    // Sidebar playlist cache: refreshed on tick, used for the Playlists section
+    pub sidebar_playlists: Vec<(i64, String)>,
+
     // Status bar
     pub status: Option<StatusMessage>,
 }
@@ -118,13 +142,20 @@ impl AppState {
             show_help: false,
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
+            focused_panel: FocusedPanel::Content,
+            sidebar_cursor: 0,
+            right_panel_queue_state: ratatui::widgets::ListState::default(),
+            cached_queue_tracks: Vec::new(),
+            cached_queue_ids: Vec::new(),
+            sidebar_playlists: Vec::new(),
             status: None,
         };
         state.reload_current_view();
+        state.refresh_sidebar_playlists();
         state
     }
 
-    /// Poll player state and clear stale status. Called every 250ms.
+    /// Poll player state and clear stale status. Called every 500ms.
     pub fn tick(&mut self) {
         self.player_cache.poll(&self.player);
         if let Some(ref s) = self.status {
@@ -134,6 +165,38 @@ impl AppState {
         }
         let skipped = self.player_cache.skipped_track_ids.clone();
         self.apply_skipped_ids(&skipped);
+        self.refresh_queue_cache();
+        self.refresh_sidebar_playlists();
+    }
+
+    /// Refresh sidebar playlist list; no-op if unchanged.
+    pub fn refresh_sidebar_playlists(&mut self) {
+        if let Ok(pls) = self.playlists.list_playlists() {
+            let new: Vec<(i64, String)> = pls.into_iter().map(|p| (p.id, p.name)).collect();
+            if new != self.sidebar_playlists {
+                self.sidebar_playlists = new;
+            }
+        }
+    }
+
+    /// Navigate directly to a playlist by ID (for sidebar playlist clicks).
+    pub fn navigate_to_playlist(&mut self, id: i64) {
+        if let Ok(Some(pl)) = self.playlists.get_playlist(id) {
+            let view = View::PlaylistDetail(PlaylistDetailState::new(pl, &self.library));
+            self.nav.replace_root(view);
+            self.sidebar_entry = SidebarEntry::Playlists;
+        }
+    }
+
+    /// Re-resolve queue track objects only when the queue IDs have changed.
+    pub fn refresh_queue_cache(&mut self) {
+        if self.player_cache.queue == self.cached_queue_ids {
+            return;
+        }
+        self.cached_queue_ids = self.player_cache.queue.clone();
+        self.cached_queue_tracks = self.cached_queue_ids.iter()
+            .filter_map(|&id| self.library.get_track(id).ok().flatten())
+            .collect();
     }
 
     fn apply_skipped_ids(&mut self, skipped: &[i64]) {
@@ -144,6 +207,49 @@ impl AppState {
             View::PlaylistDetail(s) => s.skipped_ids = skipped.to_vec(),
             _ => {}
         }
+    }
+
+    /// Cycle focus: Content → RightPanel → Sidebar → Content.
+    pub fn cycle_focus(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::Content => FocusedPanel::RightPanel,
+            FocusedPanel::RightPanel => {
+                self.sync_sidebar_cursor();
+                FocusedPanel::Sidebar
+            }
+            FocusedPanel::Sidebar => FocusedPanel::Content,
+        };
+    }
+
+    /// Cycle focus in reverse: Content → Sidebar → RightPanel → Content.
+    pub fn cycle_focus_reverse(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::Content => {
+                self.sync_sidebar_cursor();
+                FocusedPanel::Sidebar
+            }
+            FocusedPanel::Sidebar => FocusedPanel::RightPanel,
+            FocusedPanel::RightPanel => FocusedPanel::Content,
+        };
+    }
+
+    /// Sync sidebar cursor to the currently active view.
+    pub fn sync_sidebar_cursor(&mut self) {
+        let entry = self.nav.current().sidebar_entry();
+        self.sidebar_cursor = match entry {
+            SidebarEntry::Playlists => {
+                // Point cursor at the active playlist if it's in the list
+                let active_id = match self.nav.current() {
+                    View::PlaylistDetail(s) => Some(s.playlist.id),
+                    _ => None,
+                };
+                active_id
+                    .and_then(|id| self.sidebar_playlists.iter().position(|(pid, _)| *pid == id))
+                    .map(|idx| SidebarEntry::all().len() + idx)
+                    .unwrap_or(0)
+            }
+            other => SidebarEntry::all().iter().position(|e| *e == other).unwrap_or(0),
+        };
     }
 
     pub fn set_status(&mut self, text: impl Into<String>, kind: StatusKind) {

@@ -86,7 +86,7 @@ impl AlbumsState {
         if len > 0 { self.list_state.select(Some(len - 1)); }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let filtered = self.filtered_albums();
         let title = if !self.filter.is_empty() {
             format!(" Albums [filter: {}] ", self.filter)
@@ -107,10 +107,15 @@ impl AlbumsState {
             ListItem::new(Line::from(spans))
         }).collect();
 
+        let (hl_style, hl_sym) = if focused {
+            (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
+        } else {
+            (Style::default().fg(Color::DarkGray), "  ")
+        };
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(title))
-            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
-            .highlight_symbol("> ");
+            .highlight_style(hl_style)
+            .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 }

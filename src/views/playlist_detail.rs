@@ -32,7 +32,7 @@ impl PlaylistDetailState {
     pub fn jump_top(&mut self) { if !self.tracks.is_empty() { self.list_state.select(Some(0)); } }
     pub fn jump_bottom(&mut self) { if !self.tracks.is_empty() { self.list_state.select(Some(self.tracks.len()-1)); } }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let chunks = Layout::default().direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(0)]).split(area);
 
@@ -58,10 +58,15 @@ impl PlaylistDetailState {
             ListItem::new(line).style(style)
         }).collect();
 
+        let (hl_style, hl_sym) = if focused {
+            (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
+        } else {
+            (Style::default().fg(Color::DarkGray), "  ")
+        };
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(" Tracks  [J/K reorder  x remove] "))
-            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
-            .highlight_symbol("> ");
+            .highlight_style(hl_style)
+            .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, chunks[1], &mut self.list_state);
     }
 }

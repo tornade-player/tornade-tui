@@ -55,13 +55,13 @@ pub enum SidebarEntry {
 impl SidebarEntry {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Tracks => "Tracks",
-            Self::Albums => "Albums",
-            Self::Artists => "Artists",
-            Self::Genres => "Genres",
+            Self::Tracks => "1  Tracks",
+            Self::Albums => "2  Albums",
+            Self::Artists => "3  Artists",
+            Self::Genres => "4  Genres",
+            Self::Search => "5  Search",
             Self::Playlists => "Playlists",
             Self::Queue => "Queue",
-            Self::Search => "Search",
         }
     }
 
@@ -71,23 +71,15 @@ impl SidebarEntry {
             2 => Some(Self::Albums),
             3 => Some(Self::Artists),
             4 => Some(Self::Genres),
-            5 => Some(Self::Playlists),
-            6 => Some(Self::Queue),
-            7 => Some(Self::Search),
+            5 => Some(Self::Search),
             _ => None,
         }
     }
 
+    /// Library entries in sidebar order. Playlists are shown
+    /// separately as dynamic items below the "Playlists" header.
     pub fn all() -> &'static [SidebarEntry] {
-        &[
-            Self::Tracks,
-            Self::Albums,
-            Self::Artists,
-            Self::Genres,
-            Self::Playlists,
-            Self::Queue,
-            Self::Search,
-        ]
+        &[Self::Tracks, Self::Albums, Self::Artists, Self::Genres, Self::Search]
     }
 }
 

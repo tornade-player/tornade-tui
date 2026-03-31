@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{AppState, InputMode, StatusKind},
+    app::{AppState, FocusedPanel, InputMode, StatusKind},
     views::View,
     widgets::{command_bar, confirm_dialog, help_overlay, input_dialog, player_bar, sidebar},
 };
@@ -15,62 +15,70 @@ use crate::{
 pub fn draw(frame: &mut Frame, app: &mut AppState) {
     let area = frame.area();
 
-    // Main layout: body (fills remaining) + player bar at bottom
-    let main_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(4)])
-        .split(area);
-
-    let body_area = main_chunks[0];
-    let player_area = main_chunks[1];
-
-    // Body layout: sidebar (fixed) + content
+    // Body layout: sidebar (fixed) + content (fills remaining) + right panel (fixed)
     let body_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(18), Constraint::Min(0)])
-        .split(body_area);
+        .constraints([
+            Constraint::Length(18), // sidebar
+            Constraint::Min(0),     // content
+            Constraint::Length(44), // right panel: queue + player
+        ])
+        .split(area);
 
     let sidebar_area = body_chunks[0];
     let content_area = body_chunks[1];
+    let right_panel_area = body_chunks[2];
 
     // 1. Sidebar
-    sidebar::render(frame, sidebar_area, app.nav.current().sidebar_entry());
+    let active_playlist_id = match app.nav.current() {
+        crate::views::View::PlaylistDetail(s) => Some(s.playlist.id),
+        _ => None,
+    };
+    sidebar::render(
+        frame, sidebar_area,
+        app.nav.current().sidebar_entry(),
+        active_playlist_id,
+        matches!(app.focused_panel, FocusedPanel::Sidebar),
+        app.sidebar_cursor,
+        &app.sidebar_playlists,
+    );
 
-    // 2. Content area (with optional status bar at bottom)
+    // 2. Content area (view + status bar at bottom)
     let content_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(content_area);
 
-    let view_area = content_chunks[0];
-    let status_area = content_chunks[1];
+    render_view(frame, app, content_chunks[0]);
+    render_status(frame, app, content_chunks[1]);
 
-    // Render current view
-    render_view(frame, app, view_area);
+    // 3. Right panel: queue list (top) + compact player (bottom)
+    let right_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(6)])
+        .split(right_panel_area);
 
-    // Status bar
-    render_status(frame, app, status_area);
-
-    // 3. Player bar
-    player_bar::render(frame, player_area, &app.player_cache);
+    render_right_queue(frame, app, right_chunks[0]);
+    player_bar::render_compact(frame, right_chunks[1], &app.player_cache);
 
     // 4. Overlays (rendered on top)
     render_overlays(frame, app, area);
 }
 
 fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    let focused = matches!(app.focused_panel, FocusedPanel::Content);
     match app.nav.current_mut() {
-        View::Library(s) => s.render(frame, area),
-        View::Albums(s) => s.render(frame, area),
-        View::Artists(s) => s.render(frame, area),
-        View::Genres(s) => s.render(frame, area),
-        View::Playlists(s) => s.render(frame, area),
-        View::AlbumDetail(s) => s.render(frame, area),
-        View::ArtistDetail(s) => s.render(frame, area),
-        View::GenreDetail(s) => s.render(frame, area),
-        View::PlaylistDetail(s) => s.render(frame, area),
+        View::Library(s) => s.render(frame, area, focused),
+        View::Albums(s) => s.render(frame, area, focused),
+        View::Artists(s) => s.render(frame, area, focused),
+        View::Genres(s) => s.render(frame, area, focused),
+        View::Playlists(s) => s.render(frame, area, focused),
+        View::AlbumDetail(s) => s.render(frame, area, focused),
+        View::ArtistDetail(s) => s.render(frame, area, focused),
+        View::GenreDetail(s) => s.render(frame, area, focused),
+        View::PlaylistDetail(s) => s.render(frame, area, focused),
         View::Scan(s) => s.render(frame, area),
-        View::Search(s) => s.render(frame, area),
+        View::Search(s) => s.render(frame, area, focused),
         View::Queue(s) => {
             // Queue view needs access to player_cache and library; resolve tracks here
             let _ = s; // borrow ends
@@ -80,17 +88,42 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
 }
 
 fn render_queue_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
-    // Resolve queue track IDs to Track objects for display
-    let tracks: Vec<tornade_core::models::Track> = app.player_cache.queue.iter()
-        .filter_map(|&id| app.library.get_track(id).ok().flatten())
-        .collect();
+    // Use cached tracks resolved in tick() — no DB queries per frame
     let active_index = app.player_cache.queue_index;
     let skipped = app.player_cache.skipped_track_ids.clone();
-
+    let focused = matches!(app.focused_panel, FocusedPanel::Content);
+    // Borrow cached_queue_tracks and nav as separate fields so the borrow checker is happy
+    let tracks = &app.cached_queue_tracks;
     if let View::Queue(s) = app.nav.current_mut() {
         s.sync_selection(tracks.len(), active_index);
-        s.render(frame, area, &tracks, active_index, &skipped);
+        s.render(frame, area, tracks, active_index, &skipped, focused);
     }
+}
+
+fn render_right_queue(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    let active_index = app.player_cache.queue_index;
+    let skipped = app.player_cache.skipped_track_ids.clone();
+    let tracks = &app.cached_queue_tracks;
+    let focused = matches!(app.focused_panel, FocusedPanel::RightPanel);
+
+    // Auto-scroll to active track only when the user is not navigating the panel
+    if !focused {
+        if tracks.is_empty() {
+            app.right_panel_queue_state.select(None);
+        } else {
+            app.right_panel_queue_state.select(Some(active_index.min(tracks.len() - 1)));
+        }
+    }
+
+    crate::views::queue::render_panel(
+        frame,
+        area,
+        tracks,
+        active_index,
+        &skipped,
+        &mut app.right_panel_queue_state,
+        focused,
+    );
 }
 
 fn render_status(frame: &mut Frame, app: &AppState, area: Rect) {
