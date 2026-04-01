@@ -43,9 +43,11 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
             }
             // Toolbar buttons (random / repeat / shuffle / add / remove)
             let tz = app.toolbar_hit_zones;
-            if tz.random.map(|r| rect_contains(r, col, row)).unwrap_or(false)
-                || tz.shuffle.map(|r| rect_contains(r, col, row)).unwrap_or(false)
-            {
+            if tz.random.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+                handle_add_random(app);
+                return;
+            }
+            if tz.shuffle.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
                 let _ = app.player.set_shuffle(!app.player_cache.shuffle);
                 return;
             }
@@ -56,6 +58,14 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                     RepeatMode::One => RepeatMode::Off,
                 };
                 let _ = app.player.set_repeat(next);
+                return;
+            }
+            if tz.add.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+                handle_save_queue_as_playlist(app);
+                return;
+            }
+            if tz.remove.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+                handle_clear_queue_confirm(app);
                 return;
             }
 
@@ -301,6 +311,34 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         return false;
     }
 
+    // When in Search view, letter keys feed the query (not shortcuts)
+    if matches!(app.nav.current(), View::Search(_)) {
+        match key.code {
+            KeyCode::Char(c) => {
+                if let View::Search(s) = app.nav.current_mut() {
+                    s.query.push(c);
+                }
+                let query = match app.nav.current() {
+                    View::Search(s) => s.query.clone(),
+                    _ => String::new(),
+                };
+                if let View::Search(s) = app.nav.current_mut() {
+                    s.run_search_with_query(&query, &app.search_svc);
+                }
+                return false;
+            }
+            KeyCode::Backspace => {
+                if let View::Search(s) = app.nav.current_mut() {
+                    s.query.pop();
+                    let q = s.query.clone();
+                    s.run_search_with_query(&q, &app.search_svc);
+                }
+                return false;
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
         // ── Quit / back ──
         KeyCode::Char('q') | KeyCode::Esc => {
@@ -400,27 +438,6 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Rating (0-5) ──
         KeyCode::Char(c @ '0'..='5') => {
             app.rate_selected(c as u8 - b'0');
-        }
-
-        // ── Search: typing characters updates the query ──
-        KeyCode::Char(c) if matches!(app.nav.current(), View::Search(_)) => {
-            if let View::Search(s) = app.nav.current_mut() {
-                s.query.push(c);
-            }
-            let query = match app.nav.current() {
-                View::Search(s) => s.query.clone(),
-                _ => String::new(),
-            };
-            if let View::Search(s) = app.nav.current_mut() {
-                s.run_search_with_query(&query, &app.search_svc);
-            }
-        }
-        KeyCode::Backspace if matches!(app.nav.current(), View::Search(_)) => {
-            if let View::Search(s) = app.nav.current_mut() {
-                s.query.pop();
-                let q = s.query.clone();
-                s.run_search_with_query(&q, &app.search_svc);
-            }
         }
 
         _ => {}
@@ -733,6 +750,44 @@ fn handle_create_playlist(app: &mut AppState) {
     }
 }
 
+fn handle_add_random(app: &mut AppState) {
+    match app.library.get_random_tracks(30) {
+        Ok(ids) if !ids.is_empty() => {
+            match app.player.add_to_queue(ids) {
+                Ok(_) => app.set_status("Added 30 random tracks", StatusKind::Success),
+                Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+            }
+        }
+        Ok(_) => app.set_status("No tracks in library", StatusKind::Info),
+        Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+    }
+}
+
+fn handle_save_queue_as_playlist(app: &mut AppState) {
+    if app.player.get_queue().is_empty() {
+        app.set_status("Queue is empty", StatusKind::Info);
+        return;
+    }
+    app.text_input = Some(TextInputCtx {
+        prompt: "Save queue as playlist:".to_string(),
+        value: String::new(),
+        action: TextInputAction::SaveQueueAsPlaylist,
+    });
+    app.input_mode = InputMode::TextInput;
+}
+
+fn handle_clear_queue_confirm(app: &mut AppState) {
+    if app.player.get_queue().is_empty() {
+        app.set_status("Queue is already empty", StatusKind::Info);
+        return;
+    }
+    app.confirm = Some(ConfirmCtx {
+        prompt: "Clear entire queue? (y/n)".to_string(),
+        action: ConfirmAction::ClearQueue,
+    });
+    app.input_mode = InputMode::Confirm;
+}
+
 fn handle_rename_playlist(app: &mut AppState) {
     let id_and_name = match app.nav.current() {
         View::Playlists(s) => s.selected_playlist().map(|p| (p.id, p.name.clone())),
@@ -1005,6 +1060,28 @@ fn execute_text_input(app: &mut AppState, action: TextInputAction, value: String
                     app.reload_current_view();
                 }
                 Err(e) => app.set_status(format!("Import error: {}", e), StatusKind::Error),
+            }
+        }
+        TextInputAction::SaveQueueAsPlaylist => {
+            if !value.is_empty() {
+                let track_ids = app.player.get_queue();
+                if track_ids.is_empty() {
+                    app.set_status("Queue is empty", StatusKind::Info);
+                    return;
+                }
+                match app.playlists.create_playlist(&value, None) {
+                    Ok(pl) => match app.playlists.add_tracks(pl.id, track_ids) {
+                        Ok(_) => {
+                            app.set_status(
+                                format!("Saved queue to \"{}\"", value),
+                                StatusKind::Success,
+                            );
+                            app.reload_current_view();
+                        }
+                        Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+                    },
+                    Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+                }
             }
         }
     }
