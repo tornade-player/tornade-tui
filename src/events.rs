@@ -41,6 +41,23 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 let _ = app.player.next();
                 return;
             }
+            // Toolbar buttons (random / repeat / shuffle / add / remove)
+            let tz = app.toolbar_hit_zones;
+            if tz.random.map(|r| rect_contains(r, col, row)).unwrap_or(false)
+                || tz.shuffle.map(|r| rect_contains(r, col, row)).unwrap_or(false)
+            {
+                let _ = app.player.set_shuffle(!app.player_cache.shuffle);
+                return;
+            }
+            if tz.repeat.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+                let next = match app.player_cache.repeat {
+                    RepeatMode::Off => RepeatMode::All,
+                    RepeatMode::All => RepeatMode::One,
+                    RepeatMode::One => RepeatMode::Off,
+                };
+                let _ = app.player.set_repeat(next);
+                return;
+            }
 
             // Click on an album in the grid
             let clicked_idx = if let View::Albums(s) = app.nav.current() {
@@ -279,6 +296,11 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
 }
 
 fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
+    // Route keys to inline filter when active
+    if route_view_filter(app, key) {
+        return false;
+    }
+
     match key.code {
         // ── Quit / back ──
         KeyCode::Char('q') | KeyCode::Esc => {
@@ -510,27 +532,74 @@ fn handle_search_enter(app: &mut AppState) {
 }
 
 fn handle_filter(app: &mut AppState) {
-    // Activate inline filter for views that support it
     match app.nav.current_mut() {
-        View::Library(s) => {
-            s.filter_active = true;
-            app.input_mode = InputMode::TextInput;
-            app.text_input = Some(TextInputCtx {
-                prompt: "Filter tracks:".to_string(),
-                value: s.filter.clone(),
-                action: TextInputAction::ScanPath, // reuse text input; filter applied on submit
-            });
+        View::Library(s) => s.filter_active = true,
+        View::Artists(s) => s.filter_active = true,
+        View::Albums(s) => s.filter_active = true,
+        View::Genres(s) => s.filter_active = true,
+        _ => {}
+    }
+}
+
+/// Route keyboard input to the inline filter of the current view.
+/// Returns true if the key was consumed.
+fn route_view_filter(app: &mut AppState, key: KeyEvent) -> bool {
+    let is_active = match app.nav.current() {
+        View::Library(s) => s.filter_active,
+        View::Artists(s) => s.filter_active,
+        View::Albums(s)  => s.filter_active,
+        View::Genres(s)  => s.filter_active,
+        _ => false,
+    };
+    if !is_active { return false; }
+
+    // Genres use client-side filter; Library/Artists/Albums use DB search.
+    let is_db_search = matches!(app.nav.current(), View::Library(_) | View::Artists(_) | View::Albums(_));
+
+    match key.code {
+        KeyCode::Esc => {
+            match app.nav.current_mut() {
+                View::Library(s) => { s.filter_active = false; s.filter.clear(); }
+                View::Artists(s) => { s.filter_active = false; s.filter.clear(); }
+                View::Albums(s)  => { s.filter_active = false; s.filter.clear(); }
+                View::Genres(s)  => { s.filter_active = false; s.filter.clear(); }
+                _ => {}
+            }
         }
-        View::Search(s) => {
-            app.input_mode = InputMode::TextInput;
-            app.text_input = Some(TextInputCtx {
-                prompt: "Search:".to_string(),
-                value: s.query.clone(),
-                action: TextInputAction::ScanPath,
-            });
+        KeyCode::Enter => {
+            match app.nav.current_mut() {
+                View::Library(s) => s.filter_active = false,
+                View::Artists(s) => s.filter_active = false,
+                View::Albums(s)  => s.filter_active = false,
+                View::Genres(s)  => s.filter_active = false,
+                _ => {}
+            }
+        }
+        KeyCode::Backspace => {
+            match app.nav.current_mut() {
+                View::Library(s) => { s.filter.pop(); }
+                View::Artists(s) => { s.filter.pop(); }
+                View::Albums(s)  => { s.filter.pop(); }
+                View::Genres(s)  => { s.filter.pop(); }
+                _ => {}
+            }
+        }
+        KeyCode::Char(c) => {
+            match app.nav.current_mut() {
+                View::Library(s) => { s.filter.push(c); }
+                View::Artists(s) => { s.filter.push(c); }
+                View::Albums(s)  => { s.filter.push(c); }
+                View::Genres(s)  => { s.filter.push(c); }
+                _ => {}
+            }
         }
         _ => {}
     }
+
+    if is_db_search {
+        app.apply_view_search();
+    }
+    true
 }
 
 // ── Queue / playlist item movement ──────────────────────────────────────────

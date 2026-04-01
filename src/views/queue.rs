@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use tornade_core::models::{RepeatMode, Track};
 use crate::utils::{format_duration, truncate};
@@ -33,8 +33,23 @@ pub fn render_filter_bar(frame: &mut Frame, area: Rect, filter: &str, active: bo
     );
 }
 
-/// 1-row toolbar below the queue list.
-pub fn render_toolbar(frame: &mut Frame, area: Rect, shuffle: bool, repeat: &RepeatMode) {
+/// Hit zones for the 5 toolbar buttons (above the player bar).
+#[derive(Default, Clone, Copy)]
+pub struct ToolbarHitZones {
+    pub random: Option<Rect>,
+    pub repeat: Option<Rect>,
+    pub shuffle: Option<Rect>,
+    pub add: Option<Rect>,
+    pub remove: Option<Rect>,
+}
+
+/// 3-row toolbar below the queue list: icons centered vertically for bigger click targets.
+pub fn render_toolbar(
+    frame: &mut Frame,
+    area: Rect,
+    shuffle: bool,
+    repeat: &RepeatMode,
+) -> ToolbarHitZones {
     let col_active = Color::Cyan;
     let col_dim = Color::DarkGray;
 
@@ -66,11 +81,19 @@ pub fn render_toolbar(frame: &mut Frame, area: Rect, shuffle: bool, repeat: &Rep
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 icon.to_string(),
-                Style::default().fg(*col),
+                Style::default().fg(*col).add_modifier(Modifier::BOLD),
             )))
             .alignment(Alignment::Center),
             *cell,
         );
+    }
+
+    ToolbarHitZones {
+        random:  Some(cells[0]),
+        repeat:  Some(cells[1]),
+        shuffle: Some(cells[2]),
+        add:     Some(cells[3]),
+        remove:  Some(cells[4]),
     }
 }
 
@@ -138,29 +161,13 @@ pub fn render_panel(
         })
         .collect();
 
-    let title = if filter.is_empty() {
-        format!(" Queue ({}) ", tracks.len())
-    } else {
-        format!(" Queue ({}/{}) ", filtered.len(), tracks.len())
-    };
-
-    let border_style = if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default()
-    };
     let hl_style = if focused {
         Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::TOP)
-                .title(title)
-                .border_style(border_style),
-        )
+        .block(Block::default())
         .highlight_style(hl_style);
     frame.render_stateful_widget(list, area, panel_state);
 }
@@ -273,10 +280,7 @@ impl QueueState {
             (Style::default().fg(Color::DarkGray), "  ")
         };
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                " Queue ({} tracks)  [J/K reorder  x remove  X clear] ",
-                tracks.len()
-            )))
+            .block(Block::default())
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, area, &mut self.list_state);

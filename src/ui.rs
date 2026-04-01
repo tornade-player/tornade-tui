@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Clear, List, ListItem, Paragraph},
 };
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub fn draw(frame: &mut Frame, app: &mut AppState) {
-    let area = frame.area();
+    let area = margin_rect(frame.area(), 1);
 
     // Body layout: sidebar (fixed) + content (fills remaining) + right panel (fixed)
     let body_chunks = Layout::default()
@@ -26,8 +26,8 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         .split(area);
 
     let sidebar_area = body_chunks[0];
-    let content_area = body_chunks[1];
-    let right_panel_area = body_chunks[2];
+    let content_area = pad_h(body_chunks[1], 1);
+    let right_panel_area = pad_h(body_chunks[2], 1);
 
     // 1. Sidebar
     let active_playlist_id = match app.nav.current() {
@@ -52,13 +52,13 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
     app.has_pending_images = render_view(frame, app, content_chunks[0]);
     render_status(frame, app, content_chunks[1]);
 
-    // 3. Right panel: filter (1) + queue (fills) + toolbar (1) + player (7)
+    // 3. Right panel: filter (1) + queue (fills) + toolbar (3) + player (7)
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(3),
             Constraint::Length(7),
         ])
         .split(right_panel_area);
@@ -67,7 +67,7 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         frame, right_chunks[0], &app.queue_filter, app.queue_filter_active,
     );
     render_right_queue(frame, app, right_chunks[1]);
-    crate::views::queue::render_toolbar(
+    app.toolbar_hit_zones = crate::views::queue::render_toolbar(
         frame, right_chunks[2], app.player_cache.shuffle, &app.player_cache.repeat,
     );
     let album_name = app.current_album_name.as_deref();
@@ -198,10 +198,7 @@ fn render_playlist_selector(frame: &mut Frame, app: &mut AppState, area: Rect) {
     }).collect();
 
     let list = List::new(items)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .title(" Add to Playlist  [Enter select  ESC cancel] ")
-            .border_style(Style::default().fg(Color::Cyan)))
+        .block(Block::default())
         .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
@@ -214,4 +211,22 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let x = r.x + (r.width.saturating_sub(width)) / 2;
     let y = r.y + (r.height.saturating_sub(height)) / 2;
     Rect { x, y, width: width.min(r.width), height: height.min(r.height) }
+}
+
+fn margin_rect(area: Rect, m: u16) -> Rect {
+    Rect {
+        x: area.x + m,
+        y: area.y + m,
+        width: area.width.saturating_sub(m * 2),
+        height: area.height.saturating_sub(m * 2),
+    }
+}
+
+fn pad_h(area: Rect, p: u16) -> Rect {
+    Rect {
+        x: area.x + p,
+        y: area.y,
+        width: area.width.saturating_sub(p * 2),
+        height: area.height,
+    }
 }

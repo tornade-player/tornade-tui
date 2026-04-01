@@ -11,29 +11,41 @@ use tornade_core::services::PlaybackState;
 use crate::player::PlayerStateCache;
 use crate::utils::{format_duration, truncate};
 
-/// Full player panel: artwork | info | volume (top) + controls + progress (bottom).
+/// Hit zones for player buttons — positions relative to the player area.
+/// Stored in AppState so the mouse handler can use them.
+#[derive(Default, Clone, Copy)]
+pub struct PlayerHitZones {
+    pub prev: Option<Rect>,
+    pub play_pause: Option<Rect>,
+    pub next: Option<Rect>,
+    pub shuffle: Option<Rect>,
+    pub repeat: Option<Rect>,
+}
+
+/// Full player panel: artwork | info | volume (top) + controls+progress (bottom row).
+/// Returns the hit zones for the three transport buttons.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     cache: &PlayerStateCache,
     image_state: Option<&mut StatefulProtocol>,
     album_name: Option<&str>,
-) {
-    if area.height < 3 {
-        return;
+) -> PlayerHitZones {
+    if area.height < 2 {
+        return PlayerHitZones::default();
     }
 
-    // Vertical: [top: artwork+info+vol] | [controls 1] | [progress 1]
+    // Vertical: [top: artwork+info+vol (fills)] | [bottom: controls+progress (1 row)]
     let vert = Layout::vertical([
         Constraint::Min(0),
-        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(area);
 
-    // Top horizontal: [artwork 10] | [info] | [volume 7]
+    // Top horizontal: [artwork 10] | [gap 1] | [info] | [volume 7]
     let top = Layout::horizontal([
         Constraint::Length(10),
+        Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(7),
     ])
@@ -49,8 +61,8 @@ pub fn render(
         );
     }
 
-    // Track info
-    let w = top[1].width as usize;
+    // Track info (top[2] after the gap at top[1])
+    let w = top[2].width as usize;
     let (title, album, fmt, size) = match &cache.current_track {
         Some(t) => {
             let album = album_name.unwrap_or("").to_string();
@@ -84,33 +96,59 @@ pub fn render(
             Line::from(Span::styled(fmt, Style::default().fg(Color::DarkGray))),
             Line::from(Span::styled(size, Style::default().fg(Color::DarkGray))),
         ]),
-        top[1],
+        top[2],
     );
 
     // Volume knob
     let vol_pct = (cache.volume * 100.0).round() as u8;
-    render_volume_knob(frame, top[2], vol_pct);
+    render_volume_knob(frame, top[3], vol_pct);
 
-    // Controls: ◀◀  ▶/⏸  ▶▶
+    // Bottom row: [transport=10] [gap=1] [elapsed=5] [progress] [total=5]
+    let bottom = Layout::horizontal([
+        Constraint::Length(10), // transport (prev + play + next)
+        Constraint::Length(1),  // gap — mirrors top artwork gap
+        Constraint::Length(5),  // elapsed
+        Constraint::Min(0),     // progress gauge
+        Constraint::Length(5),  // total
+    ])
+    .split(vert[1]);
+
+    // Transport: spread prev / play / next across the full artwork width (3+4+3=10)
+    let transport = Layout::horizontal([
+        Constraint::Length(3),  // ◀◀
+        Constraint::Length(4),  // ▶/⏸  (wider = more prominent)
+        Constraint::Length(3),  // ▶▶
+    ])
+    .split(bottom[0]);
+
     let play_icon = match cache.state {
         PlaybackState::Playing => "⏸",
         _ => "▶",
     };
+
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("◀◀ ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                play_icon,
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" ▶▶", Style::default().fg(Color::Gray)),
-        ])),
-        vert[1],
+        Paragraph::new(Line::from(Span::styled(
+            "◀◀",
+            Style::default().fg(Color::Gray),
+        ))),
+        transport[0],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            play_icon,
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ))),
+        transport[1],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "▶▶",
+            Style::default().fg(Color::Gray),
+        ))),
+        transport[2],
     );
 
-    // Progress bar
+    // Elapsed / progress / total
     let total_secs = cache
         .current_track
         .as_ref()
@@ -123,17 +161,37 @@ pub fn render(
     };
     let elapsed = format_duration(cache.position as u64);
     let total_dur = format_duration(total_secs as u64);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            elapsed,
+            Style::default().fg(Color::Gray),
+        ))),
+        bottom[2],
+    );
     frame.render_widget(
         Gauge::default()
-            .gauge_style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .bg(Color::Rgb(50, 52, 64)),
-            )
+            .gauge_style(Style::default().fg(Color::Cyan).bg(Color::Rgb(50, 52, 64)))
             .ratio(ratio)
-            .label(format!("{}  {}", elapsed, total_dur)),
-        vert[2],
+            .label(""),
+        bottom[3],
     );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            total_dur,
+            Style::default().fg(Color::Gray),
+        )))
+        .alignment(ratatui::layout::Alignment::Right),
+        bottom[4],
+    );
+
+    PlayerHitZones {
+        prev: Some(transport[0]),
+        play_pause: Some(transport[1]),
+        next: Some(transport[2]),
+        shuffle: None,
+        repeat: None,
+    }
 }
 
 fn render_volume_knob(frame: &mut Frame, area: Rect, pct: u8) {

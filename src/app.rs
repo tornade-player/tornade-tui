@@ -13,6 +13,7 @@ use crate::{
         LibraryState, AlbumsState, ArtistsState, GenresState, PlaylistsState,
         PlaylistDetailState, QueueState, SearchState,
     },
+    views::queue::ToolbarHitZones,
     widgets::player_bar::PlayerHitZones,
 };
 
@@ -135,6 +136,8 @@ pub struct AppState {
 
     // Hit zones for player transport buttons (updated each frame)
     pub player_hit_zones: PlayerHitZones,
+    // Hit zones for the toolbar buttons above the player (updated each frame)
+    pub toolbar_hit_zones: ToolbarHitZones,
 }
 
 impl AppState {
@@ -180,6 +183,7 @@ impl AppState {
             player_artwork: None,
             player_artwork_track_id: None,
             player_hit_zones: PlayerHitZones::default(),
+            toolbar_hit_zones: ToolbarHitZones::default(),
         };
         state.reload_current_view();
         state.refresh_sidebar_playlists();
@@ -326,6 +330,49 @@ impl AppState {
         };
         self.nav.replace_root(view);
         self.reload_current_view();
+    }
+
+    /// Run a DB search for the current view's filter and update search_results.
+    /// Called on every filter keystroke (FTS5 is fast enough for interactive use).
+    pub fn apply_view_search(&mut self) {
+        let query = match self.nav.current() {
+            View::Library(s) if s.filter_active && !s.filter.is_empty() => s.filter.clone(),
+            View::Artists(s) if s.filter_active && !s.filter.is_empty() => s.filter.clone(),
+            View::Albums(s)  if s.filter_active && !s.filter.is_empty() => s.filter.clone(),
+            View::Library(s) if s.filter.is_empty() => { let _ = s; String::new() }
+            View::Artists(s) if s.filter.is_empty() => { let _ = s; String::new() }
+            View::Albums(s)  if s.filter.is_empty() => { let _ = s; String::new() }
+            _ => return,
+        };
+
+        if query.is_empty() {
+            match self.nav.current_mut() {
+                View::Library(s) => { s.search_results = None; s.list_state.select(if s.tracks.is_empty() { None } else { Some(0) }); }
+                View::Artists(s) => { s.search_results = None; s.list_state.select(if s.artists.is_empty() { None } else { Some(0) }); }
+                View::Albums(s)  => { s.search_results = None; s.selected = 0; s.scroll_row = 0; }
+                _ => {}
+            }
+            return;
+        }
+
+        let Ok(results) = self.search_svc.search(&query) else { return };
+
+        match self.nav.current_mut() {
+            View::Library(s) => {
+                s.list_state.select(if results.tracks.is_empty() { None } else { Some(0) });
+                s.search_results = Some(results.tracks);
+            }
+            View::Artists(s) => {
+                s.list_state.select(if results.artists.is_empty() { None } else { Some(0) });
+                s.search_results = Some(results.artists);
+            }
+            View::Albums(s) => {
+                s.selected = 0;
+                s.scroll_row = 0;
+                s.search_results = Some(results.albums);
+            }
+            _ => {}
+        }
     }
 
     pub fn reload_current_view(&mut self) {
