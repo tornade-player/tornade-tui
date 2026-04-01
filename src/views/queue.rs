@@ -157,7 +157,7 @@ pub fn render_panel(
     let list = List::new(items)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::TOP)
                 .title(title)
                 .border_style(border_style),
         )

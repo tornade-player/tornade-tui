@@ -13,6 +13,7 @@ use crate::{
         LibraryState, AlbumsState, ArtistsState, GenresState, PlaylistsState,
         PlaylistDetailState, QueueState, SearchState,
     },
+    widgets::player_bar::PlayerHitZones,
 };
 
 /// Which of the three panels currently has keyboard focus.
@@ -131,6 +132,9 @@ pub struct AppState {
     pub current_album_name: Option<String>,
     pub player_artwork: Option<StatefulProtocol>,
     player_artwork_track_id: Option<i64>,
+
+    // Hit zones for player transport buttons (updated each frame)
+    pub player_hit_zones: PlayerHitZones,
 }
 
 impl AppState {
@@ -175,6 +179,7 @@ impl AppState {
             current_album_name: None,
             player_artwork: None,
             player_artwork_track_id: None,
+            player_hit_zones: PlayerHitZones::default(),
         };
         state.reload_current_view();
         state.refresh_sidebar_playlists();

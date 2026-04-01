@@ -71,7 +71,7 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         frame, right_chunks[2], app.player_cache.shuffle, &app.player_cache.repeat,
     );
     let album_name = app.current_album_name.as_deref();
-    player_bar::render(
+    app.player_hit_zones = player_bar::render(
         frame, right_chunks[3], &app.player_cache, app.player_artwork.as_mut(), album_name,
     );
 

@@ -19,9 +19,32 @@ use crate::{
 pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
+            let col = mouse.column;
+            let row = mouse.row;
+
+            // Player transport buttons
+            let zones = app.player_hit_zones;
+            if zones.prev.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+                let _ = app.player.previous();
+                return;
+            }
+            if zones.play_pause.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+                use tornade_core::services::PlaybackState;
+                if app.player_cache.state == PlaybackState::Playing {
+                    let _ = app.player.pause();
+                } else {
+                    let _ = app.player.resume();
+                }
+                return;
+            }
+            if zones.next.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+                let _ = app.player.next();
+                return;
+            }
+
             // Click on an album in the grid
             let clicked_idx = if let View::Albums(s) = app.nav.current() {
-                s.album_at_pos(mouse.column, mouse.row)
+                s.album_at_pos(col, row)
             } else {
                 None
             };
@@ -36,6 +59,10 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
         MouseEventKind::ScrollUp => scroll_content(app, -1),
         _ => {}
     }
+}
+
+fn rect_contains(r: ratatui::layout::Rect, col: u16, row: u16) -> bool {
+    col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
 }
 
 fn scroll_content(app: &mut AppState, delta: i32) {
