@@ -29,6 +29,8 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
     let content_area = pad_h(body_chunks[1], 1);
     let right_panel_area = pad_h(body_chunks[2], 1);
 
+    app.sidebar_area = Some(sidebar_area);
+
     // 1. Sidebar
     let active_playlist_id = match app.nav.current() {
         crate::views::View::PlaylistDetail(s) => Some(s.playlist.id),
@@ -63,6 +65,7 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         ])
         .split(right_panel_area);
 
+    app.right_queue_area = Some(right_chunks[1]);
     crate::views::queue::render_filter_bar(
         frame, right_chunks[0], &app.queue_filter, app.queue_filter_active,
     );

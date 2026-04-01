@@ -80,11 +80,123 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                     s.selected = idx;
                 }
                 push_album_detail(app);
+                return;
+            }
+
+            // Click on sidebar entry
+            if let Some(area) = app.sidebar_area {
+                if rect_contains(area, col, row) {
+                    handle_sidebar_click(app, area, row);
+                    return;
+                }
+            }
+
+            // Click on track in library view (single = select, double = add to queue)
+            let library_click = if let View::Library(s) = app.nav.current() {
+                s.list_area.and_then(|a| {
+                    if rect_contains(a, col, row) {
+                        let idx = (row - a.y) as usize + s.list_state.offset();
+                        if idx < s.display_tracks().len() { Some(idx) } else { None }
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            };
+            if let Some(track_idx) = library_click {
+                let is_double = check_double_click(app, col, row);
+                if let View::Library(s) = app.nav.current_mut() {
+                    s.list_state.select(Some(track_idx));
+                }
+                app.focused_panel = FocusedPanel::Content;
+                if is_double {
+                    app.add_selected_to_queue();
+                }
+                return;
+            }
+
+            // Click on item in right-panel queue (single = select, double = play)
+            let queue_click = app.right_queue_area.and_then(|area| {
+                if !rect_contains(area, col, row) { return None; }
+                let offset = app.right_panel_queue_state.offset();
+                let rel = (row - area.y) as usize + offset;
+                let filter_lower = app.queue_filter.to_lowercase();
+                if app.queue_filter.is_empty() {
+                    if rel < app.cached_queue_tracks.len() { Some((rel, rel)) } else { None }
+                } else {
+                    app.cached_queue_tracks.iter().enumerate()
+                        .filter(|(_, t)| {
+                            t.title.to_lowercase().contains(&filter_lower)
+                                || t.artist_names.iter().any(|a| a.to_lowercase().contains(&filter_lower))
+                        })
+                        .nth(rel)
+                        .map(|(orig, _)| (rel, orig))
+                }
+            });
+            if let Some((filtered_idx, orig_idx)) = queue_click {
+                let is_double = check_double_click(app, col, row);
+                app.right_panel_queue_state.select(Some(filtered_idx));
+                app.focused_panel = FocusedPanel::RightPanel;
+                if is_double {
+                    let _ = app.player.jump_to_index(orig_idx);
+                    if app.player_cache.state != PlaybackState::Playing {
+                        let _ = app.player.resume();
+                    }
+                }
             }
         }
         MouseEventKind::ScrollDown => scroll_content(app, 1),
         MouseEventKind::ScrollUp => scroll_content(app, -1),
         _ => {}
+    }
+}
+
+/// Returns true when this click is a double-click (same cell within 400ms).
+/// Always records the current click as the last click.
+fn check_double_click(app: &mut AppState, col: u16, row: u16) -> bool {
+    let now = std::time::Instant::now();
+    let is_double = app.last_click
+        .map(|(lc, lr, ref lt)| lc == col && lr == row && lt.elapsed() < Duration::from_millis(400))
+        .unwrap_or(false);
+    app.last_click = Some((col, row, now));
+    is_double
+}
+
+/// Sidebar entries in display order (must match LIBRARY_ENTRIES in widgets/sidebar.rs).
+const SIDEBAR_DISPLAY_ORDER: [SidebarEntry; 5] = [
+    SidebarEntry::Search,
+    SidebarEntry::Tracks,
+    SidebarEntry::Albums,
+    SidebarEntry::Artists,
+    SidebarEntry::Genres,
+];
+
+/// Handle a left-click inside the sidebar. Navigates directly to the clicked entry.
+fn handle_sidebar_click(app: &mut AppState, area: ratatui::layout::Rect, row: u16) {
+    // The sidebar block has a 1-row top border; items start at area.y + 1.
+    // Item layout (0-indexed from the first item row):
+    //   0: blank
+    //   1: "Library" header
+    //   2 + 2*i (i=0..4): library entry i  (matches SIDEBAR_DISPLAY_ORDER)
+    //   12: blank (gap before "Playlists")
+    //   13: "Playlists" header
+    //   14: blank
+    //   15 + 2*j (j=0..n): playlist j
+    let item_index = row.saturating_sub(area.y + 1) as usize;
+    if item_index >= 2 && item_index <= 10 && (item_index - 2) % 2 == 0 {
+        let entry_pos = (item_index - 2) / 2;
+        if let Some(&entry) = SIDEBAR_DISPLAY_ORDER.get(entry_pos) {
+            app.navigate_to(entry);
+            app.focused_panel = FocusedPanel::Content;
+        }
+    } else if item_index >= 15 && (item_index - 15) % 2 == 0 {
+        let playlist_pos = (item_index - 15) / 2;
+        let playlist_id = app.sidebar_playlists.get(playlist_pos).map(|&(id, _)| id);
+        if let Some(id) = playlist_id {
+            app.navigate_to_playlist(id);
+            app.focused_panel = FocusedPanel::Content;
+        }
     }
 }
 

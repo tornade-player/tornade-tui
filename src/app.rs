@@ -59,6 +59,7 @@ pub enum TextInputAction {
     CreatePlaylist,
     RenamePlaylist { id: i64 },
     ImportM3u,
+    SaveQueueAsPlaylist,
 }
 
 /// Context for a pending confirmation dialog.
@@ -138,6 +139,12 @@ pub struct AppState {
     pub player_hit_zones: PlayerHitZones,
     // Hit zones for the toolbar buttons above the player (updated each frame)
     pub toolbar_hit_zones: ToolbarHitZones,
+
+    // Click areas updated each frame by ui::draw (used for mouse hit detection)
+    pub sidebar_area: Option<ratatui::layout::Rect>,
+    pub right_queue_area: Option<ratatui::layout::Rect>,
+    // Double-click detection: last click (col, row, instant)
+    pub last_click: Option<(u16, u16, std::time::Instant)>,
 }
 
 impl AppState {
@@ -184,6 +191,9 @@ impl AppState {
             player_artwork_track_id: None,
             player_hit_zones: PlayerHitZones::default(),
             toolbar_hit_zones: ToolbarHitZones::default(),
+            sidebar_area: None,
+            right_queue_area: None,
+            last_click: None,
         };
         state.reload_current_view();
         state.refresh_sidebar_playlists();
