@@ -52,14 +52,28 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
     app.has_pending_images = render_view(frame, app, content_chunks[0]);
     render_status(frame, app, content_chunks[1]);
 
-    // 3. Right panel: queue list (top) + compact player (bottom)
+    // 3. Right panel: filter (1) + queue (fills) + toolbar (1) + player (7)
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(6)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(7),
+        ])
         .split(right_panel_area);
 
-    render_right_queue(frame, app, right_chunks[0]);
-    player_bar::render_compact(frame, right_chunks[1], &app.player_cache);
+    crate::views::queue::render_filter_bar(
+        frame, right_chunks[0], &app.queue_filter, app.queue_filter_active,
+    );
+    render_right_queue(frame, app, right_chunks[1]);
+    crate::views::queue::render_toolbar(
+        frame, right_chunks[2], app.player_cache.shuffle, &app.player_cache.repeat,
+    );
+    let album_name = app.current_album_name.as_deref();
+    player_bar::render(
+        frame, right_chunks[3], &app.player_cache, app.player_artwork.as_mut(), album_name,
+    );
 
     // 4. Overlays (rendered on top)
     render_overlays(frame, app, area);
@@ -124,6 +138,7 @@ fn render_right_queue(frame: &mut Frame, app: &mut AppState, area: Rect) {
         &skipped,
         &mut app.right_panel_queue_state,
         focused,
+        &app.queue_filter,
     );
 }
 

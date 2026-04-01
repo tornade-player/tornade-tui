@@ -1,5 +1,5 @@
 use std::time::Instant;
-use ratatui_image::picker::Picker;
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use tornade_core::{
     models::Track,
     services::{ArtworkService, LibraryService, PlaybackState, PlaylistService, PlayerService, SearchService},
@@ -122,6 +122,15 @@ pub struct AppState {
 
     // Set to true when background image loads are in progress; drives faster poll timeout
     pub has_pending_images: bool,
+
+    // Queue filter (right panel)
+    pub queue_filter: String,
+    pub queue_filter_active: bool,
+
+    // Player artwork + album name (refreshed when track changes)
+    pub current_album_name: Option<String>,
+    pub player_artwork: Option<StatefulProtocol>,
+    player_artwork_track_id: Option<i64>,
 }
 
 impl AppState {
@@ -161,6 +170,11 @@ impl AppState {
             sidebar_playlists: Vec::new(),
             status: None,
             has_pending_images: false,
+            queue_filter: String::new(),
+            queue_filter_active: false,
+            current_album_name: None,
+            player_artwork: None,
+            player_artwork_track_id: None,
         };
         state.reload_current_view();
         state.refresh_sidebar_playlists();
@@ -179,6 +193,32 @@ impl AppState {
         self.apply_skipped_ids(&skipped);
         self.refresh_queue_cache();
         self.refresh_sidebar_playlists();
+        self.refresh_player_artwork();
+    }
+
+    fn refresh_player_artwork(&mut self) {
+        let current_id = self.player_cache.current_track.as_ref().map(|t| t.id);
+        if current_id == self.player_artwork_track_id {
+            return;
+        }
+        self.player_artwork_track_id = current_id;
+        let track = self.player_cache.current_track.clone();
+        if let Some(ref track) = track {
+            if let Some(album_id) = track.album_id {
+                if let Ok(Some(album)) = self.library.get_album(album_id) {
+                    self.current_album_name = Some(album.title.clone());
+                    let path = album.online_artwork_path.as_ref()
+                        .or(album.artwork_path.as_ref())
+                        .cloned();
+                    self.player_artwork = path
+                        .and_then(|p| image::open(p).ok())
+                        .map(|img| self.picker.new_resize_protocol(img));
+                    return;
+                }
+            }
+        }
+        self.current_album_name = None;
+        self.player_artwork = None;
     }
 
     /// Refresh sidebar playlist list; no-op if unchanged.

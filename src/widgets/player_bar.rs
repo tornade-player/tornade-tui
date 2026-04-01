@@ -1,99 +1,198 @@
-use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Gauge, Paragraph}};
-use tornade_core::models::RepeatMode;
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Gauge, Paragraph},
+};
+use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
+use tornade_core::models::AudioFormat;
 use tornade_core::services::PlaybackState;
 use crate::player::PlayerStateCache;
 use crate::utils::{format_duration, truncate};
 
-/// Compact stacked player for the right panel (no horizontal split).
-pub fn render_compact(frame: &mut Frame, area: Rect, cache: &PlayerStateCache) {
-    let block = Block::default().borders(Borders::ALL).title(" Now Playing ");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    if inner.height == 0 {
+/// Full player panel: artwork | info | volume (top) + controls + progress (bottom).
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    cache: &PlayerStateCache,
+    image_state: Option<&mut StatefulProtocol>,
+    album_name: Option<&str>,
+) {
+    if area.height < 3 {
         return;
     }
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // state icon + title
-            Constraint::Length(1), // artist
-            Constraint::Length(1), // progress gauge
-            Constraint::Min(0),    // shuffle / repeat / vol
-        ])
-        .split(inner);
+    // Vertical: [top: artwork+info+vol] | [controls 1] | [progress 1]
+    let vert = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
 
-    let max_title = (inner.width as usize).saturating_sub(3); // icon(1) + space(1) + 1
-    let (title, artist) = match &cache.current_track {
-        Some(t) => (
-            truncate(&t.title, max_title),
-            t.artist_names.first().cloned().unwrap_or_default(),
-        ),
-        None => ("Nothing playing".to_string(), String::new()),
-    };
+    // Top horizontal: [artwork 10] | [info] | [volume 7]
+    let top = Layout::horizontal([
+        Constraint::Length(10),
+        Constraint::Min(0),
+        Constraint::Length(7),
+    ])
+    .split(vert[0]);
 
-    let state_icon = match cache.state {
-        PlaybackState::Playing => "▶",
-        PlaybackState::Paused => "⏸",
-        PlaybackState::Stopped => "⏹",
-    };
-
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(state_icon, Style::default().fg(Color::Cyan)),
-            Span::raw(" "),
-            Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
-        ])),
-        rows[0],
-    );
-
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            format!("  {}", truncate(&artist, (inner.width as usize).saturating_sub(2))),
-            Style::default().fg(Color::Gray),
-        ))),
-        rows[1],
-    );
-
-    let total_secs = cache.current_track.as_ref().map(|t| t.duration.as_secs_f64()).unwrap_or(1.0);
-    let ratio = if total_secs > 0.0 { (cache.position / total_secs).min(1.0) } else { 0.0 };
-    let elapsed = format_duration(cache.position as u64);
-    let total = format_duration(total_secs as u64);
-
-    frame.render_widget(
-        Gauge::default()
-            .gauge_style(Style::default().fg(Color::Cyan))
-            .ratio(ratio)
-            .label(format!("{}/{}", elapsed, total)),
-        rows[2],
-    );
-
-    if rows.len() > 3 && rows[3].height > 0 {
-        let shuffle_str = if cache.shuffle { "S" } else { " " };
-        let repeat_str = match cache.repeat {
-            RepeatMode::Off => " ",
-            RepeatMode::All => "↺",
-            RepeatMode::One => "↺1",
-        };
-        let vol_pct = (cache.volume * 100.0) as u8;
-
+    // Artwork
+    if let Some(proto) = image_state {
+        frame.render_stateful_widget(StatefulImage::new(), top[0], proto);
+    } else {
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    shuffle_str,
-                    if cache.shuffle { Style::default().fg(Color::Cyan) } else { Style::default().fg(Color::DarkGray) },
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    repeat_str,
-                    if cache.repeat != RepeatMode::Off { Style::default().fg(Color::Cyan) } else { Style::default().fg(Color::DarkGray) },
-                ),
-                Span::raw("  "),
-                Span::styled(format!("Vol {:>3}%", vol_pct), Style::default().fg(Color::Gray)),
-            ])),
-            rows[3],
+            Block::default().style(Style::default().bg(Color::Rgb(35, 37, 48))),
+            top[0],
         );
     }
+
+    // Track info
+    let w = top[1].width as usize;
+    let (title, album, fmt, size) = match &cache.current_track {
+        Some(t) => {
+            let album = album_name.unwrap_or("").to_string();
+            let (f, s) = format_audio_info(t);
+            (truncate(&t.title, w), truncate(&album, w), f, s)
+        }
+        None => (
+            "Nothing playing".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
+    };
+    let artist = cache
+        .current_track
+        .as_ref()
+        .and_then(|t| t.artist_names.first().cloned())
+        .unwrap_or_default();
+
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                title,
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(album, Style::default().fg(Color::Gray))),
+            Line::from(Span::styled(
+                truncate(&artist, w),
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(fmt, Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled(size, Style::default().fg(Color::DarkGray))),
+        ]),
+        top[1],
+    );
+
+    // Volume knob
+    let vol_pct = (cache.volume * 100.0).round() as u8;
+    render_volume_knob(frame, top[2], vol_pct);
+
+    // Controls: ◀◀  ▶/⏸  ▶▶
+    let play_icon = match cache.state {
+        PlaybackState::Playing => "⏸",
+        _ => "▶",
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("◀◀ ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                play_icon,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ▶▶", Style::default().fg(Color::Gray)),
+        ])),
+        vert[1],
+    );
+
+    // Progress bar
+    let total_secs = cache
+        .current_track
+        .as_ref()
+        .map(|t| t.duration.as_secs_f64())
+        .unwrap_or(1.0);
+    let ratio = if total_secs > 0.0 {
+        (cache.position / total_secs).min(1.0)
+    } else {
+        0.0
+    };
+    let elapsed = format_duration(cache.position as u64);
+    let total_dur = format_duration(total_secs as u64);
+    frame.render_widget(
+        Gauge::default()
+            .gauge_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .bg(Color::Rgb(50, 52, 64)),
+            )
+            .ratio(ratio)
+            .label(format!("{}  {}", elapsed, total_dur)),
+        vert[2],
+    );
 }
 
+fn render_volume_knob(frame: &mut Frame, area: Rect, pct: u8) {
+    if area.height < 4 {
+        return;
+    }
+    let top_pad = area.height.saturating_sub(4) / 2;
+    let knob = Rect {
+        x: area.x,
+        y: area.y + top_pad,
+        width: area.width.min(7),
+        height: 4,
+    };
+    let col = if pct > 0 { Color::Cyan } else { Color::DarkGray };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled("╭────╮", Style::default().fg(col))),
+            Line::from(vec![
+                Span::styled("│", Style::default().fg(col)),
+                Span::styled(
+                    format!("{:>3} ", pct),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("│", Style::default().fg(col)),
+            ]),
+            Line::from(vec![
+                Span::styled("│", Style::default().fg(col)),
+                Span::styled("  % ", Style::default().fg(Color::Gray)),
+                Span::styled("│", Style::default().fg(col)),
+            ]),
+            Line::from(Span::styled("╰────╯", Style::default().fg(col))),
+        ]),
+        knob,
+    );
+}
+
+fn format_audio_info(track: &tornade_core::models::Track) -> (String, String) {
+    let fmt = match track.file_type {
+        AudioFormat::Flac => "FLAC",
+        AudioFormat::Mp3 => "MP3",
+        AudioFormat::Aac => "AAC",
+        AudioFormat::Alac => "ALAC",
+    };
+    let bit = track
+        .bit_depth
+        .map(|b| format!(" {}bit", b))
+        .unwrap_or_default();
+    let sr = track
+        .sample_rate
+        .map(|s| {
+            if s % 1000 == 0 {
+                format!(" {}kHz", s / 1000)
+            } else {
+                format!(" {:.1}kHz", s as f64 / 1000.0)
+            }
+        })
+        .unwrap_or_default();
+    let size = format!("{:.1} MB", track.file_size as f64 / (1024.0 * 1024.0));
+    (format!("{}{}{}", fmt, bit, sr), size)
+}

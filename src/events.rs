@@ -173,10 +173,30 @@ fn handle_sidebar_focus(app: &mut AppState, key: KeyEvent) -> bool {
 }
 
 fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
+    // Filter input mode: route all keys to the filter field
+    if app.queue_filter_active {
+        match key.code {
+            KeyCode::Esc => {
+                app.queue_filter_active = false;
+                app.queue_filter.clear();
+            }
+            KeyCode::Enter => {
+                app.queue_filter_active = false;
+            }
+            KeyCode::Backspace => { app.queue_filter.pop(); }
+            KeyCode::Char(c) => { app.queue_filter.push(c); }
+            _ => {}
+        }
+        return false;
+    }
+
     let queue_len = app.cached_queue_tracks.len();
     match key.code {
         KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
             app.focused_panel = FocusedPanel::Content;
+        }
+        KeyCode::Char('/') => {
+            app.queue_filter_active = true;
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if queue_len > 0 {
