@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Gauge, Paragraph},
@@ -130,21 +130,24 @@ pub fn render(
         Paragraph::new(Line::from(Span::styled(
             "◀◀",
             Style::default().fg(Color::Gray),
-        ))),
+        )))
+        .alignment(Alignment::Center),
         transport[0],
     );
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             play_icon,
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ))),
+        )))
+        .alignment(Alignment::Center),
         transport[1],
     );
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             "▶▶",
             Style::default().fg(Color::Gray),
-        ))),
+        )))
+        .alignment(Alignment::Center),
         transport[2],
     );
 

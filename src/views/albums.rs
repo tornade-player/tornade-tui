@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use image::Rgba;
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
@@ -31,6 +31,7 @@ type PendingQueue = Arc<Mutex<Vec<(i64, image::DynamicImage)>>>;
 
 pub struct AlbumsState {
     pub albums: Vec<Album>,
+    pub search_results: Option<Vec<Album>>,
     pub filter: String,
     pub filter_active: bool,
     pub selected: usize,
@@ -52,6 +53,7 @@ impl Default for AlbumsState {
     fn default() -> Self {
         Self {
             albums: Vec::new(),
+            search_results: None,
             filter: String::new(),
             filter_active: false,
             selected: 0,
@@ -100,19 +102,12 @@ impl AlbumsState {
         self.albums = library.list_albums(None, None, None, Some(5000), Some(0)).unwrap_or_default();
     }
 
-    pub fn filtered_albums(&self) -> Vec<&Album> {
-        if self.filter.is_empty() {
-            self.albums.iter().collect()
-        } else {
-            let q = self.filter.to_lowercase();
-            self.albums.iter().filter(|a| {
-                a.title.to_lowercase().contains(&q) || a.artist_name.to_lowercase().contains(&q)
-            }).collect()
-        }
+    pub fn display_albums(&self) -> &[Album] {
+        self.search_results.as_deref().unwrap_or(&self.albums)
     }
 
     pub fn selected_album(&self) -> Option<&Album> {
-        self.filtered_albums().get(self.selected).copied()
+        self.display_albums().get(self.selected)
     }
 
     pub fn album_at_pos(&self, x: u16, y: u16) -> Option<usize> {
@@ -125,12 +120,12 @@ impl AlbumsState {
         if col >= self.cols { return None; }
         let row = self.scroll_row + row_in_view;
         let idx = row * self.cols + col;
-        let total = self.filtered_albums().len();
+        let total = self.display_albums().len();
         if idx >= total { None } else { Some(idx) }
     }
 
     pub fn move_right(&mut self) {
-        let len = self.filtered_albums().len();
+        let len = self.display_albums().len();
         if len > 0 { self.selected = (self.selected + 1).min(len - 1); }
     }
 
@@ -139,7 +134,7 @@ impl AlbumsState {
     }
 
     pub fn move_down(&mut self) {
-        let len = self.filtered_albums().len();
+        let len = self.display_albums().len();
         if len == 0 { return; }
         self.selected = (self.selected + self.cols).min(len - 1);
     }
@@ -149,7 +144,7 @@ impl AlbumsState {
     }
 
     pub fn page_down(&mut self) {
-        let len = self.filtered_albums().len();
+        let len = self.display_albums().len();
         if len == 0 { return; }
         self.selected = (self.selected + self.cols * 3).min(len - 1);
     }
@@ -161,13 +156,17 @@ impl AlbumsState {
     pub fn jump_top(&mut self) { self.selected = 0; self.scroll_row = 0; }
 
     pub fn jump_bottom(&mut self) {
-        let len = self.filtered_albums().len();
+        let len = self.display_albums().len();
         if len > 0 { self.selected = len - 1; }
     }
 
     /// Render the albums grid. Returns `true` when background image loads are still in progress
     /// (caller should redraw soon).
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) -> bool {
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)]).split(area);
+        render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
+        let area = chunks[2];
+
         // Compute square image dimensions from font metrics
         let font = picker.font_size();
         self.img_cols = if font.0 > 0 {
@@ -190,7 +189,7 @@ impl AlbumsState {
         self.cols = ((grid_area.width / self.cell_stride_w) as usize).max(1);
         let rows_visible = ((grid_area.height / self.cell_stride_h) as usize).max(1);
 
-        let total = self.filtered_albums().len();
+        let total = self.display_albums().len();
         if total > 0 && self.selected >= total { self.selected = total - 1; }
 
         let sel_row = if self.cols > 0 { self.selected / self.cols } else { 0 };
@@ -207,7 +206,7 @@ impl AlbumsState {
         type AlbumTuple = (usize, i64, String, String, Option<u16>,
                            Option<std::path::PathBuf>, Option<std::path::PathBuf>);
         let visible: Vec<AlbumTuple> = {
-            let filtered = self.filtered_albums();
+            let filtered = self.display_albums();
             filtered[start..end].iter().enumerate().map(|(i, a)| (
                 start + i, a.id, a.title.clone(), a.artist_name.clone(), a.year,
                 a.online_artwork_path.clone(), a.artwork_path.clone(),
@@ -345,4 +344,15 @@ fn render_cell(
         ]),
         text_rect,
     );
+}
+
+fn render_search_bar(frame: &mut Frame, area: Rect, filter: &str, active: bool) {
+    let cursor = if active { "_" } else { "" };
+    let (text, style) = if filter.is_empty() && !active {
+        ("\u{f002}  Search...".to_string(), Style::default().fg(Color::DarkGray))
+    } else {
+        (format!("\u{f002}  {}{}", filter, cursor), Style::default().fg(Color::White))
+    };
+    let bg = if active { Style::default().bg(Color::Rgb(40, 42, 54)) } else { Style::default() };
+    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))).style(bg), area);
 }

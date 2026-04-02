@@ -78,13 +78,20 @@ pub fn render_toolbar(
     ];
 
     for (cell, (icon, col)) in cells.iter().zip(buttons.iter()) {
+        // Vertically center the icon in the toolbar area (split into top pad / icon / bottom pad)
+        let vert = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(*cell);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 icon.to_string(),
                 Style::default().fg(*col).add_modifier(Modifier::BOLD),
             )))
             .alignment(Alignment::Center),
-            *cell,
+            vert[1],
         );
     }
 

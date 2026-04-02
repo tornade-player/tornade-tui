@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Clear, Paragraph}};
+use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Clear, Paragraph}};
 
 pub fn render(frame: &mut Frame, prompt: &str, value: &str) {
     let area = centered_rect(60, 7, frame.area());
@@ -15,7 +15,7 @@ pub fn render(frame: &mut Frame, prompt: &str, value: &str) {
         Line::from(""),
         Line::from(Span::styled("  Enter: confirm    ESC: cancel", Style::default().fg(Color::DarkGray))),
     ])
-    .block(Block::default().borders(Borders::ALL).title(" Input ").border_style(Style::default().fg(Color::Cyan)));
+    .block(Block::default());
     frame.render_widget(content, area);
 }
 

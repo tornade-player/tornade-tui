@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState}};
+use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState}};
 use tornade_core::{models::Playlist, services::PlaylistService};
 use crate::utils::truncate;
 
@@ -44,7 +44,7 @@ impl PlaylistsState {
             (Style::default().fg(Color::DarkGray), "  ")
         };
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(format!(" Playlists ({}) ", self.playlists.len())))
+            .block(Block::default())
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, area, &mut self.list_state);

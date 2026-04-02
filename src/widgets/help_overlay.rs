@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Clear, List, ListItem}};
+use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Clear, List, ListItem}};
 
 pub fn render(frame: &mut Frame) {
     let area = centered_rect(80, 85, frame.area());
@@ -69,14 +69,8 @@ pub fn render(frame: &mut Frame) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(Block::default().borders(Borders::ALL).title(" Help  [? or ESC to close] ").inner(area));
+        .split(area);
 
-    // Render the block border
-    let outer = Block::default()
-        .borders(Borders::ALL)
-        .title(" Help  [? or ESC to close] ")
-        .border_style(Style::default().fg(Color::Cyan));
-    frame.render_widget(outer, area);
 
     let half = sections.len() / 2 + sections.len() % 2;
     for (col_idx, section_slice) in [&sections[..half], &sections[half..]].iter().enumerate() {

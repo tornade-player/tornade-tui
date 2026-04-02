@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState, Paragraph}};
+use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Paragraph}};
 use tornade_core::{models::{Album, Artist, Track}, services::SearchService};
 use crate::utils::{format_duration, truncate};
 
@@ -81,7 +81,7 @@ impl SearchState {
         let query_bar = Paragraph::new(Line::from(vec![
             Span::styled("Search: ", Style::default().fg(Color::Cyan)),
             Span::raw(&self.query),
-        ])).block(Block::default().borders(Borders::ALL).title(" Search  [Tab switch section] "));
+        ])).block(Block::default());
         frame.render_widget(query_bar, chunks[0]);
 
         self.render_section(frame, chunks[1], SearchSection::Tracks, focused);
@@ -91,7 +91,6 @@ impl SearchState {
 
     fn render_section(&mut self, frame: &mut Frame, area: Rect, section: SearchSection, focused: bool) {
         let is_active = self.section == section;
-        let border_style = if is_active { Style::default().fg(Color::Cyan) } else { Style::default() };
         let (hl_style, hl_sym) = if focused && is_active {
             (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
         } else {
@@ -108,7 +107,7 @@ impl SearchState {
                     ]))
                 }).collect();
                 let list = List::new(items)
-                    .block(Block::default().borders(Borders::ALL).title(format!(" Tracks ({}) ", self.tracks.len())).border_style(border_style))
+                    .block(Block::default())
                     .highlight_style(hl_style)
                     .highlight_symbol(hl_sym);
                 frame.render_stateful_widget(list, area, &mut self.tracks_state);
@@ -121,7 +120,7 @@ impl SearchState {
                     ]))
                 }).collect();
                 let list = List::new(items)
-                    .block(Block::default().borders(Borders::ALL).title(format!(" Albums ({}) ", self.albums.len())).border_style(border_style))
+                    .block(Block::default())
                     .highlight_style(hl_style)
                     .highlight_symbol(hl_sym);
                 frame.render_stateful_widget(list, area, &mut self.albums_state);
@@ -131,7 +130,7 @@ impl SearchState {
                     ListItem::new(Line::from(Span::raw(truncate(&a.name, 60))))
                 }).collect();
                 let list = List::new(items)
-                    .block(Block::default().borders(Borders::ALL).title(format!(" Artists ({}) ", self.artists.len())).border_style(border_style))
+                    .block(Block::default())
                     .highlight_style(hl_style)
                     .highlight_symbol(hl_sym);
                 frame.render_stateful_widget(list, area, &mut self.artists_state);

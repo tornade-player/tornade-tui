@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Clear, List, ListItem, Paragraph}};
+use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Clear, List, ListItem, Paragraph}};
 
 pub fn render(frame: &mut Frame, area: Rect, input: &str, completions: &[String]) {
     // Command input line (bottom of area)
@@ -25,7 +25,7 @@ pub fn render(frame: &mut Frame, area: Rect, input: &str, completions: &[String]
             .map(|c| ListItem::new(Line::from(Span::styled(c.as_str(), Style::default().fg(Color::Cyan)))))
             .collect();
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Commands "));
+            .block(Block::default());
         frame.render_widget(list, popup_area);
     }
 }

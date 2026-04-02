@@ -21,3 +21,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
 env_logger = "0.11"
+
+# Local development override — remove when tornade-core is tagged with the 008 changes
+[patch."https://github.com/tornade-player/tornade-core"]
+tornade-core = { path = "/Users/thomas/Apps/tornade-core" }

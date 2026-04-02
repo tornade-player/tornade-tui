@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState, Paragraph}};
+use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Paragraph}};
 use tornade_core::{models::{Playlist, Track}, services::LibraryService};
 use crate::utils::{format_duration, format_rating, truncate};
 
@@ -39,7 +39,7 @@ impl PlaylistDetailState {
         let header = Paragraph::new(Line::from(Span::styled(
             format!("{} · {} tracks", truncate(&self.playlist.name, 40), self.tracks.len()),
             Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        ))).block(Block::default().borders(Borders::ALL));
+        ))).block(Block::default());
         frame.render_widget(header, chunks[0]);
 
         let items: Vec<ListItem> = self.tracks.iter().enumerate().map(|(pos, t)| {
@@ -64,7 +64,7 @@ impl PlaylistDetailState {
             (Style::default().fg(Color::DarkGray), "  ")
         };
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Tracks  [J/K reorder  x remove] "))
+            .block(Block::default())
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, chunks[1], &mut self.list_state);

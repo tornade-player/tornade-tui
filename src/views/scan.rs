@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use ratatui::{Frame, layout::{Alignment, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Gauge, Paragraph}};
+use ratatui::{Frame, layout::{Alignment, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Gauge, Paragraph}};
 use tornade_core::services::ScanProgress;
 use crate::utils::truncate;
 
@@ -46,7 +46,7 @@ impl ScanState {
         }
 
         let para = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(" Library Scan "))
+            .block(Block::default())
             .alignment(Alignment::Center);
         frame.render_widget(para, area);
 

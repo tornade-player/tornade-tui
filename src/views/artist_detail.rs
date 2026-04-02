@@ -1,6 +1,6 @@
 use std::path::Path;
 use image::{DynamicImage, Rgba};
-use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState}};
+use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState}};
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use tornade_core::{models::{Album, Artist}, services::LibraryService};
 use crate::utils::truncate;
@@ -82,7 +82,7 @@ impl ArtistDetailState {
             (Style::default().fg(Color::DarkGray), "  ")
         };
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Albums "))
+            .block(Block::default())
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, chunks[1], &mut self.list_state);
@@ -116,14 +116,14 @@ impl ArtistDetailState {
                     Style::default().fg(Color::DarkGray),
                 )),
             ])
-            .block(Block::default().borders(Borders::ALL));
+            .block(Block::default());
             frame.render_widget(meta, h_chunks[1]);
         } else {
             let header = Paragraph::new(vec![
                 Line::from(Span::styled(truncate(&self.artist.name, 60), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))),
                 Line::from(Span::styled(format!("{} albums", self.albums.len()), Style::default().fg(Color::DarkGray))),
             ])
-            .block(Block::default().borders(Borders::ALL));
+            .block(Block::default());
             frame.render_widget(header, area);
         }
     }

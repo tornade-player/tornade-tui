@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Clear, Paragraph}};
+use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Clear, Paragraph}};
 
 pub fn render(frame: &mut Frame, prompt: &str) {
     let area = centered_rect(50, 7, frame.area());
@@ -12,7 +12,7 @@ pub fn render(frame: &mut Frame, prompt: &str) {
             Span::styled("  [n] Cancel  ", Style::default().fg(Color::Red)),
         ]),
     ])
-    .block(Block::default().borders(Borders::ALL).title(" Confirm ").border_style(Style::default().fg(Color::Yellow)));
+    .block(Block::default());
     frame.render_widget(content, area);
 }
 
