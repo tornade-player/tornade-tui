@@ -46,6 +46,7 @@ impl NavigationStack {
         self.stack.len() == 1
     }
 
+    #[allow(dead_code)]
     pub fn depth(&self) -> usize {
         self.stack.len()
     }

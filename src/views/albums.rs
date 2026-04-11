@@ -231,7 +231,7 @@ impl AlbumsState {
             self.scroll_row = sel_row + 1 - rows_visible;
         }
 
-        let total_rows = (total + self.cols - 1) / self.cols;
+        let total_rows = total.div_ceil(self.cols);
         let start = self.scroll_row * self.cols;
         let end = ((self.scroll_row + rows_visible) * self.cols).min(total);
 
@@ -363,6 +363,7 @@ impl AlbumsState {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_cell(
     frame: &mut Frame,
     area: Rect,

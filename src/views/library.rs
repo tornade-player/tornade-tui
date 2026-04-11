@@ -12,8 +12,10 @@ use ratatui::{
 use tornade_core::models::Track;
 use tornade_core::services::LibraryService;
 
+#[allow(dead_code)] // reserved for pagination when library is large
 const PAGE_SIZE: usize = 50;
 
+#[derive(Default)]
 pub struct LibraryState {
     /// Full unfiltered library (loaded on init / reload).
     pub tracks: Vec<Track>,
@@ -27,22 +29,6 @@ pub struct LibraryState {
     scrollbar_state: ScrollbarState,
     /// Area of the track list (set each frame during render, used for mouse hit detection).
     pub list_area: Option<Rect>,
-}
-
-impl Default for LibraryState {
-    fn default() -> Self {
-        Self {
-            tracks: Vec::new(),
-            search_results: None,
-            list_state: ListState::default(),
-            total_count: 0,
-            filter: String::new(),
-            filter_active: false,
-            skipped_ids: Vec::new(),
-            scrollbar_state: ScrollbarState::default(),
-            list_area: None,
-        }
-    }
 }
 
 impl LibraryState {

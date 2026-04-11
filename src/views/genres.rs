@@ -11,24 +11,13 @@ use ratatui::{
 };
 use tornade_core::{models::Genre, services::LibraryService};
 
+#[derive(Default)]
 pub struct GenresState {
     pub genres: Vec<(Genre, u32, u32)>,
     pub filter: String,
     pub filter_active: bool,
     pub list_state: ListState,
     scrollbar_state: ScrollbarState,
-}
-
-impl Default for GenresState {
-    fn default() -> Self {
-        Self {
-            genres: Vec::new(),
-            filter: String::new(),
-            filter_active: false,
-            list_state: ListState::default(),
-            scrollbar_state: ScrollbarState::default(),
-        }
-    }
 }
 
 impl GenresState {

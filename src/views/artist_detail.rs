@@ -61,7 +61,7 @@ impl ArtistDetailState {
         let image_state = if photo_path.exists() {
             image::open(&photo_path)
                 .ok()
-                .map(|img| apply_circle_mask(img))
+                .map(apply_circle_mask)
                 .map(|img| picker.new_resize_protocol(img))
         } else {
             None

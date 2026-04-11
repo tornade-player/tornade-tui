@@ -105,6 +105,7 @@ pub fn render_toolbar(
 }
 
 /// Compact read-only queue for the always-visible right panel, with optional filter.
+#[allow(clippy::too_many_arguments)]
 pub fn render_panel(
     frame: &mut Frame,
     area: Rect,
@@ -183,16 +184,9 @@ pub fn render_panel(
     frame.render_stateful_widget(list, area, panel_state);
 }
 
+#[derive(Default)]
 pub struct QueueState {
     pub list_state: ListState,
-}
-
-impl Default for QueueState {
-    fn default() -> Self {
-        Self {
-            list_state: ListState::default(),
-        }
-    }
 }
 
 impl QueueState {

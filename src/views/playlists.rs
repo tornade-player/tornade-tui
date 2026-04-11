@@ -8,20 +8,11 @@ use ratatui::{
 };
 use tornade_core::{models::Playlist, services::PlaylistService};
 
+#[derive(Default)]
 pub struct PlaylistsState {
     pub playlists: Vec<Playlist>,
     pub list_state: ListState,
     scrollbar_state: ScrollbarState,
-}
-
-impl Default for PlaylistsState {
-    fn default() -> Self {
-        Self {
-            playlists: Vec::new(),
-            list_state: ListState::default(),
-            scrollbar_state: ScrollbarState::default(),
-        }
-    }
 }
 
 impl PlaylistsState {

@@ -89,6 +89,7 @@ pub struct AppState {
     pub library: LibraryService,
     pub playlists: PlaylistService,
     pub search_svc: SearchService,
+    #[allow(dead_code)] // held to keep the service alive (background artwork downloads)
     pub artwork: ArtworkService,
     pub paths: AppPaths,
     pub picker: Picker,
@@ -209,10 +210,12 @@ impl AppState {
     /// Poll player state and clear stale status. Called every 500ms.
     pub fn tick(&mut self) {
         self.player_cache.poll(&self.player);
-        if let Some(ref s) = self.status {
-            if s.set_at.elapsed().as_secs() >= 3 {
-                self.status = None;
-            }
+        if self
+            .status
+            .as_ref()
+            .is_some_and(|s| s.set_at.elapsed().as_secs() >= 3)
+        {
+            self.status = None;
         }
         let skipped = self.player_cache.skipped_track_ids.clone();
         self.apply_skipped_ids(&skipped);
@@ -228,21 +231,20 @@ impl AppState {
         }
         self.player_artwork_track_id = current_id;
         let track = self.player_cache.current_track.clone();
-        if let Some(ref track) = track {
-            if let Some(album_id) = track.album_id {
-                if let Ok(Some(album)) = self.library.get_album(album_id) {
-                    self.current_album_name = Some(album.title.clone());
-                    let path = album
-                        .online_artwork_path
-                        .as_ref()
-                        .or(album.artwork_path.as_ref())
-                        .cloned();
-                    self.player_artwork = path
-                        .and_then(|p| image::open(p).ok())
-                        .map(|img| self.picker.new_resize_protocol(img));
-                    return;
-                }
-            }
+        if let Some(ref track) = track
+            && let Some(album_id) = track.album_id
+            && let Ok(Some(album)) = self.library.get_album(album_id)
+        {
+            self.current_album_name = Some(album.title.clone());
+            let path = album
+                .online_artwork_path
+                .as_ref()
+                .or(album.artwork_path.as_ref())
+                .cloned();
+            self.player_artwork = path
+                .and_then(|p| image::open(p).ok())
+                .map(|img| self.picker.new_resize_protocol(img));
+            return;
         }
         self.current_album_name = None;
         self.player_artwork = None;
@@ -460,16 +462,13 @@ impl AppState {
     }
 
     pub fn play_from_current_view(&mut self) {
-        match self.nav.current() {
-            View::Queue(s) => {
-                let idx = s.list_state.selected().unwrap_or(0);
-                let _ = self.player.jump_to_index(idx);
-                if self.player_cache.state != PlaybackState::Playing {
-                    let _ = self.player.resume();
-                }
-                return;
+        if let View::Queue(s) = self.nav.current() {
+            let idx = s.list_state.selected().unwrap_or(0);
+            let _ = self.player.jump_to_index(idx);
+            if self.player_cache.state != PlaybackState::Playing {
+                let _ = self.player.resume();
             }
-            _ => {}
+            return;
         }
         let (ids, index) = match self.nav.current() {
             View::Library(s) => (s.visible_track_ids(), s.list_state.selected().unwrap_or(0)),

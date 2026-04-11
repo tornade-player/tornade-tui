@@ -56,6 +56,27 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 let _ = app.player.next();
                 return;
             }
+            if zones
+                .shuffle
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
+                let _ = app.player.set_shuffle(!app.player_cache.shuffle);
+                return;
+            }
+            if zones
+                .repeat
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
+                let next = match app.player_cache.repeat {
+                    RepeatMode::Off => RepeatMode::All,
+                    RepeatMode::All => RepeatMode::One,
+                    RepeatMode::One => RepeatMode::Off,
+                };
+                let _ = app.player.set_repeat(next);
+                return;
+            }
             // Toolbar buttons (random / repeat / shuffle / add / remove)
             let tz = app.toolbar_hit_zones;
             if tz
@@ -115,11 +136,11 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
             }
 
             // Click on sidebar entry
-            if let Some(area) = app.sidebar_area {
-                if rect_contains(area, col, row) {
-                    handle_sidebar_click(app, area, row);
-                    return;
-                }
+            if let Some(area) = app.sidebar_area
+                && rect_contains(area, col, row)
+            {
+                handle_sidebar_click(app, area, row);
+                return;
             }
 
             // Click on track in library view (single = select, double = add to queue)
@@ -230,13 +251,13 @@ fn handle_sidebar_click(app: &mut AppState, area: ratatui::layout::Rect, row: u1
     //   14: blank
     //   15 + 2*j (j=0..n): playlist j
     let item_index = row.saturating_sub(area.y + 1) as usize;
-    if item_index >= 2 && item_index <= 10 && (item_index - 2) % 2 == 0 {
+    if (2..=10).contains(&item_index) && (item_index - 2).is_multiple_of(2) {
         let entry_pos = (item_index - 2) / 2;
         if let Some(&entry) = SIDEBAR_DISPLAY_ORDER.get(entry_pos) {
             app.navigate_to(entry);
             app.focused_panel = FocusedPanel::Content;
         }
-    } else if item_index >= 15 && (item_index - 15) % 2 == 0 {
+    } else if item_index >= 15 && (item_index - 15).is_multiple_of(2) {
         let playlist_pos = (item_index - 15) / 2;
         let playlist_id = app.sidebar_playlists.get(playlist_pos).map(|&(id, _)| id);
         if let Some(id) = playlist_id {
@@ -304,12 +325,20 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
     }
 
     // Digit shortcuts (1-5) navigate library views from any panel
-    if let KeyCode::Char(c @ '1'..='5') = key.code {
-        if let Some(entry) = SidebarEntry::from_digit(c as u8 - b'0') {
-            app.navigate_to(entry);
-            app.focused_panel = FocusedPanel::Content;
-            return false;
+    if let KeyCode::Char(c @ '1'..='5') = key.code
+        && let Some(entry) = SidebarEntry::from_digit(c as u8 - b'0')
+    {
+        app.navigate_to(entry);
+        app.focused_panel = FocusedPanel::Content;
+        return false;
+    }
+
+    // In Search view, Tab cycles search sections instead of panel focus
+    if key.code == KeyCode::Tab && matches!(app.nav.current(), View::Search(_)) {
+        if let View::Search(s) = app.nav.current_mut() {
+            s.next_section();
         }
+        return false;
     }
 
     // Tab / Shift+Tab cycle panel focus forward / backward
@@ -945,29 +974,29 @@ fn handle_move_down(app: &mut AppState) {
 fn handle_move_up_item(app: &mut AppState) {
     match app.nav.current() {
         View::Queue(s) => {
-            if let Some(pos) = s.list_state.selected() {
-                if pos > 0 {
-                    let prev = pos - 1;
-                    let _ = app.player.set_queue({
-                        let mut q = app.player_cache.queue.clone();
-                        q.swap(pos, prev);
-                        q
-                    });
-                    if let View::Queue(s) = app.nav.current_mut() {
-                        s.list_state.select(Some(prev));
-                    }
+            if let Some(pos) = s.list_state.selected()
+                && pos > 0
+            {
+                let prev = pos - 1;
+                let _ = app.player.set_queue({
+                    let mut q = app.player_cache.queue.clone();
+                    q.swap(pos, prev);
+                    q
+                });
+                if let View::Queue(s) = app.nav.current_mut() {
+                    s.list_state.select(Some(prev));
                 }
             }
         }
         View::PlaylistDetail(s) => {
-            if let Some(pos) = s.list_state.selected() {
-                if pos > 0 {
-                    let pid = s.playlist.id;
-                    let _ = app.playlists.move_track(pid, pos, pos - 1);
-                    reload_playlist_detail(app, pid);
-                    if let View::PlaylistDetail(s) = app.nav.current_mut() {
-                        s.list_state.select(Some(pos - 1));
-                    }
+            if let Some(pos) = s.list_state.selected()
+                && pos > 0
+            {
+                let pid = s.playlist.id;
+                let _ = app.playlists.move_track(pid, pos, pos - 1);
+                reload_playlist_detail(app, pid);
+                if let View::PlaylistDetail(s) = app.nav.current_mut() {
+                    s.list_state.select(Some(pos - 1));
                 }
             }
         }
@@ -976,12 +1005,12 @@ fn handle_move_up_item(app: &mut AppState) {
 }
 
 fn reload_playlist_detail(app: &mut AppState, playlist_id: i64) {
-    if let Ok(Some(pl)) = app.playlists.get_playlist(playlist_id) {
-        if let View::PlaylistDetail(s) = app.nav.current_mut() {
-            let sel = s.list_state.selected();
-            *s = PlaylistDetailState::new(pl, &app.library);
-            s.list_state.select(sel);
-        }
+    if let Ok(Some(pl)) = app.playlists.get_playlist(playlist_id)
+        && let View::PlaylistDetail(s) = app.nav.current_mut()
+    {
+        let sel = s.list_state.selected();
+        *s = PlaylistDetailState::new(pl, &app.library);
+        s.list_state.select(sel);
     }
 }
 
@@ -1115,15 +1144,14 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
             app.playlist_selector_state.select(Some(p));
         }
         KeyCode::Enter => {
-            if let Some(idx) = app.playlist_selector_state.selected() {
-                if let Some(pl) = playlists.get(idx) {
-                    let pid = pl.id;
-                    if let Some(track_id) = app.selected_track_id() {
-                        match app.playlists.add_tracks(pid, vec![track_id]) {
-                            Ok(_) => app.set_status("Added to playlist", StatusKind::Success),
-                            Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
-                        }
-                    }
+            if let Some(idx) = app.playlist_selector_state.selected()
+                && let Some(pl) = playlists.get(idx)
+                && let Some(track_id) = app.selected_track_id()
+            {
+                let pid = pl.id;
+                match app.playlists.add_tracks(pid, vec![track_id]) {
+                    Ok(_) => app.set_status("Added to playlist", StatusKind::Success),
+                    Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
                 }
             }
             app.show_playlist_selector = false;
@@ -1172,7 +1200,11 @@ fn execute_command(app: &mut AppState, input: &str) {
     match Command::parse(input) {
         Command::Scan { path } => start_scan(app, path),
         Command::Cleanup => {
-            app.set_status("Cleanup not available in this version", StatusKind::Info);
+            app.confirm = Some(ConfirmCtx {
+                prompt: "Remove missing files from library?".to_string(),
+                action: ConfirmAction::LibraryCleanup,
+            });
+            app.input_mode = InputMode::Confirm;
         }
         Command::Rate { stars } => app.rate_selected(stars),
         Command::QueueAdd => app.add_selected_to_queue(),
@@ -1254,18 +1286,31 @@ fn execute_command(app: &mut AppState, input: &str) {
 
 fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
     let path = expand_tilde(&path.to_string_lossy());
+    let scan_state = crate::views::scan::ScanState::new(std::path::PathBuf::from(&path));
+    app.nav.push(View::Scan(scan_state));
     match app.library.add_source("Music", &path) {
         Ok(source) => match app.library.scan_directory(&path, source.id) {
             Ok(result) => {
+                if let View::Scan(s) = app.nav.current_mut() {
+                    s.is_complete = true;
+                }
                 app.set_status(
                     format!("Scan complete: {} tracks added", result.tracks_added),
                     StatusKind::Success,
                 );
                 app.reload_current_view();
             }
-            Err(e) => app.set_status(format!("Scan error: {}", e), StatusKind::Error),
+            Err(e) => {
+                if let View::Scan(s) = app.nav.current_mut() {
+                    s.error = Some(e.to_string());
+                }
+                app.set_status(format!("Scan error: {}", e), StatusKind::Error);
+            }
         },
-        Err(e) => app.set_status(format!("Source error: {}", e), StatusKind::Error),
+        Err(e) => {
+            app.nav.pop();
+            app.set_status(format!("Source error: {}", e), StatusKind::Error);
+        }
     }
 }
 
@@ -1417,9 +1462,23 @@ fn execute_confirm(app: &mut AppState, action: ConfirmAction) {
             }
             Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
         },
-        ConfirmAction::LibraryCleanup => {
-            app.set_status("Cleanup not available in this version", StatusKind::Info);
-        }
+        ConfirmAction::LibraryCleanup => match app.library.validate_sources() {
+            Ok(sources) => {
+                let invalid = sources.iter().filter(|(_, ok)| !*ok).count();
+                if invalid == 0 {
+                    app.set_status("Library is clean — no missing sources", StatusKind::Info);
+                } else {
+                    app.set_status(
+                        format!(
+                            "{} source(s) inaccessible — rescan to update library",
+                            invalid
+                        ),
+                        StatusKind::Error,
+                    );
+                }
+            }
+            Err(e) => app.set_status(format!("Cleanup error: {}", e), StatusKind::Error),
+        },
     }
 }
 

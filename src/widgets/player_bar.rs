@@ -14,6 +14,7 @@ use tornade_core::services::PlaybackState;
 /// Hit zones for player buttons — positions relative to the player area.
 /// Stored in AppState so the mouse handler can use them.
 #[derive(Default, Clone, Copy)]
+#[allow(dead_code)] // shuffle/repeat zones reserved for future mouse support
 pub struct PlayerHitZones {
     pub prev: Option<Rect>,
     pub play_pause: Option<Rect>,

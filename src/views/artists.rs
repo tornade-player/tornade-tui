@@ -12,6 +12,7 @@ use ratatui::{
 use tornade_core::models::Artist;
 use tornade_core::services::LibraryService;
 
+#[derive(Default)]
 pub struct ArtistsState {
     pub artists: Vec<Artist>,
     pub search_results: Option<Vec<Artist>>,
@@ -19,19 +20,6 @@ pub struct ArtistsState {
     pub filter: String,
     pub filter_active: bool,
     scrollbar_state: ScrollbarState,
-}
-
-impl Default for ArtistsState {
-    fn default() -> Self {
-        Self {
-            artists: Vec::new(),
-            search_results: None,
-            list_state: ListState::default(),
-            filter: String::new(),
-            filter_active: false,
-            scrollbar_state: ScrollbarState::default(),
-        }
-    }
 }
 
 impl ArtistsState {

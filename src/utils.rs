@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use tornade_core::models::AudioFormat;
 
 pub fn expand_tilde(s: &str) -> PathBuf {
-    if s.starts_with("~/") || s == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(format!("{}{}", home, &s[1..]));
-        }
+    if (s.starts_with("~/") || s == "~")
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return PathBuf::from(format!("{}{}", home, &s[1..]));
     }
     PathBuf::from(s)
 }

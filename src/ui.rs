@@ -232,17 +232,17 @@ fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
     }
 
     // Text input dialog
-    if app.input_mode == InputMode::TextInput {
-        if let Some(ref ctx) = app.text_input {
-            input_dialog::render(frame, &ctx.prompt, &ctx.value);
-        }
+    if app.input_mode == InputMode::TextInput
+        && let Some(ref ctx) = app.text_input
+    {
+        input_dialog::render(frame, &ctx.prompt, &ctx.value);
     }
 
     // Confirm dialog
-    if app.input_mode == InputMode::Confirm {
-        if let Some(ref ctx) = app.confirm {
-            confirm_dialog::render(frame, &ctx.prompt);
-        }
+    if app.input_mode == InputMode::Confirm
+        && let Some(ref ctx) = app.confirm
+    {
+        confirm_dialog::render(frame, &ctx.prompt);
     }
 
     // Playlist selector overlay

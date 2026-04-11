@@ -90,20 +90,21 @@ impl ScanState {
         frame.render_widget(para, area);
 
         // Progress gauge
-        if let Some(ref p) = self.progress {
-            if p.total_files > 0 && !self.is_complete {
-                let pct = (p.processed_files as f64 / p.total_files as f64 * 100.0) as u16;
-                let gauge_area = ratatui::layout::Rect {
-                    x: area.x + 4,
-                    y: area.y + area.height.saturating_sub(5),
-                    width: area.width.saturating_sub(8),
-                    height: 1,
-                };
-                let gauge = Gauge::default()
-                    .gauge_style(Style::default().fg(Color::Cyan))
-                    .percent(pct);
-                frame.render_widget(gauge, gauge_area);
-            }
+        if let Some(ref p) = self.progress
+            && p.total_files > 0
+            && !self.is_complete
+        {
+            let pct = (p.processed_files as f64 / p.total_files as f64 * 100.0) as u16;
+            let gauge_area = ratatui::layout::Rect {
+                x: area.x + 4,
+                y: area.y + area.height.saturating_sub(5),
+                width: area.width.saturating_sub(8),
+                height: 1,
+            };
+            let gauge = Gauge::default()
+                .gauge_style(Style::default().fg(Color::Cyan))
+                .percent(pct);
+            frame.render_widget(gauge, gauge_area);
         }
     }
 }

@@ -98,7 +98,7 @@ impl AlbumDetailState {
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         // Layout: tracks + sections (left ~68%) | artwork + About (right ~32%)
-        let right_w = (area.width * 32 / 100).max(24).min(40);
+        let right_w = (area.width * 32 / 100).clamp(24, 40);
         let h = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(0), Constraint::Length(right_w)])
@@ -127,10 +127,10 @@ impl AlbumDetailState {
         .split(padded);
 
         // Image
-        if img_h > 0 {
-            if let Some(ref mut proto) = self.image_state {
-                frame.render_stateful_widget(StatefulImage::new(), v[0], proto);
-            }
+        if img_h > 0
+            && let Some(ref mut proto) = self.image_state
+        {
+            frame.render_stateful_widget(StatefulImage::new(), v[0], proto);
         }
 
         // About section directly below artwork, no gap
@@ -245,7 +245,7 @@ impl AlbumDetailState {
         };
 
         if two_columns {
-            let mid = (self.tracks.len() + 1) / 2;
+            let mid = self.tracks.len().div_ceil(2);
             let col_w = area.width / 2;
             let max_title = ((col_w as usize).saturating_sub(14)).max(10);
 
