@@ -12,8 +12,26 @@ use crate::{
     widgets::{command_bar, confirm_dialog, help_overlay, input_dialog, player_bar, sidebar},
 };
 
+const MIN_WIDTH: u16 = 80;
+const MIN_HEIGHT: u16 = 24;
+
 pub fn draw(frame: &mut Frame, app: &mut AppState) {
-    let area = margin_rect(frame.area(), 1);
+    let full_area = frame.area();
+    if full_area.width < MIN_WIDTH || full_area.height < MIN_HEIGHT {
+        let msg = format!(
+            "Terminal too small — resize to at least {}x{}  (current: {}x{})",
+            MIN_WIDTH, MIN_HEIGHT, full_area.width, full_area.height
+        );
+        let p = Paragraph::new(msg)
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(ratatui::layout::Alignment::Center);
+        let y = full_area.height / 2;
+        let area = Rect { x: full_area.x, y, width: full_area.width, height: 1 };
+        frame.render_widget(p, area);
+        return;
+    }
+
+    let area = margin_rect(full_area, 1);
 
     // Body layout: sidebar (fixed) + content (fills remaining) + right panel (fixed)
     let body_chunks = Layout::default()
