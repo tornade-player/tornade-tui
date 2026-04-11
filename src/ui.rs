@@ -1,170 +1,310 @@
-// UI rendering with ratatui
-// Layout: header (stats), main (track list), footer (status bar)
-
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{App, View};
+use crate::{
+    app::{AppState, FocusedPanel, InputMode, StatusKind},
+    views::View,
+    widgets::{command_bar, confirm_dialog, help_overlay, input_dialog, player_bar, sidebar},
+};
 
-pub fn draw(f: &mut Frame, app: &App) {
-    // Main layout: [Header, Body, Footer]
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Body
-            Constraint::Length(3), // Footer
-        ])
-        .split(f.size());
+const MIN_WIDTH: u16 = 80;
+const MIN_HEIGHT: u16 = 24;
 
-    draw_header(f, app, chunks[0]);
-    draw_body(f, app, chunks[1]);
-    draw_footer(f, app, chunks[2]);
-}
-
-fn draw_header(f: &mut Frame, app: &App, area: Rect) {
-    let title = if app.search_mode {
-        format!("🎵 Tornade TUI - Search: {}_", app.search_query)
-    } else {
-        match app.view {
-            View::Library => String::from("🎵 Tornade TUI - Library"),
-            View::Albums => String::from("🎵 Tornade TUI - Albums"),
-            View::Search => String::from("🎵 Tornade TUI - Search Results"),
-        }
-    };
-
-    let stats_text = format!(
-        " {} tracks │ {} albums │ {} artists ",
-        app.track_count, app.album_count, app.artist_count
-    );
-
-    let header = Paragraph::new(vec![
-        Line::from(Span::styled(
-            title,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(stats_text, Style::default().fg(Color::Gray))),
-    ])
-    .block(Block::default().borders(Borders::BOTTOM))
-    .alignment(Alignment::Center);
-
-    f.render_widget(header, area);
-}
-
-fn draw_body(f: &mut Frame, app: &App, area: Rect) {
-    if app.tracks.is_empty() {
-        // Empty state
-        let empty_msg = Paragraph::new(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "No tracks loaded",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Scan a music library using the Rust API or add tracks via CLI",
-                Style::default().fg(Color::Gray),
-            )),
-        ])
-        .alignment(Alignment::Center);
-
-        f.render_widget(empty_msg, area);
+pub fn draw(frame: &mut Frame, app: &mut AppState) {
+    let full_area = frame.area();
+    if full_area.width < MIN_WIDTH || full_area.height < MIN_HEIGHT {
+        let msg = format!(
+            "Terminal too small — resize to at least {}x{}  (current: {}x{})",
+            MIN_WIDTH, MIN_HEIGHT, full_area.width, full_area.height
+        );
+        let p = Paragraph::new(msg)
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(ratatui::layout::Alignment::Center);
+        let y = full_area.height / 2;
+        let area = Rect {
+            x: full_area.x,
+            y,
+            width: full_area.width,
+            height: 1,
+        };
+        frame.render_widget(p, area);
         return;
     }
 
-    // Track list
-    let items: Vec<ListItem> = app
-        .tracks
+    let area = margin_rect(full_area, 1);
+
+    // Body layout: sidebar (fixed) + content (fills remaining) + right panel (fixed)
+    let body_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(18), // sidebar
+            Constraint::Min(0),     // content
+            Constraint::Length(44), // right panel: queue + player
+        ])
+        .split(area);
+
+    let sidebar_area = body_chunks[0];
+    let content_area = pad_h(body_chunks[1], 1);
+    let right_panel_area = pad_h(body_chunks[2], 1);
+
+    app.sidebar_area = Some(sidebar_area);
+
+    // 1. Sidebar
+    let active_playlist_id = match app.nav.current() {
+        crate::views::View::PlaylistDetail(s) => Some(s.playlist.id),
+        _ => None,
+    };
+    sidebar::render(
+        frame,
+        sidebar_area,
+        app.nav.current().sidebar_entry(),
+        active_playlist_id,
+        matches!(app.focused_panel, FocusedPanel::Sidebar),
+        app.sidebar_cursor,
+        &app.sidebar_playlists,
+    );
+
+    // 2. Content area (view + status bar at bottom)
+    let content_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(content_area);
+
+    app.has_pending_images = render_view(frame, app, content_chunks[0]);
+    render_status(frame, app, content_chunks[1]);
+
+    // 3. Right panel: filter (1) + queue (fills) + toolbar (3) + player (7)
+    let right_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(3),
+            Constraint::Length(7),
+        ])
+        .split(right_panel_area);
+
+    app.right_queue_area = Some(right_chunks[1]);
+    crate::views::queue::render_filter_bar(
+        frame,
+        right_chunks[0],
+        &app.queue_filter,
+        app.queue_filter_active,
+    );
+    render_right_queue(frame, app, right_chunks[1]);
+    app.toolbar_hit_zones = crate::views::queue::render_toolbar(
+        frame,
+        right_chunks[2],
+        app.player_cache.shuffle,
+        &app.player_cache.repeat,
+    );
+    let album_name = app.current_album_name.as_deref();
+    app.player_hit_zones = player_bar::render(
+        frame,
+        right_chunks[3],
+        &app.player_cache,
+        app.player_artwork.as_mut(),
+        album_name,
+    );
+
+    // 4. Overlays (rendered on top)
+    render_overlays(frame, app, area);
+}
+
+/// Returns true when background image loads are still in progress (caller should redraw soon).
+fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
+    let focused = matches!(app.focused_panel, FocusedPanel::Content);
+    match app.nav.current_mut() {
+        View::Library(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Albums(s) => s.render(frame, area, focused, &mut app.picker),
+        View::Artists(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Genres(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Playlists(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::AlbumDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::ArtistDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::GenreDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::PlaylistDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Scan(s) => {
+            s.render(frame, area);
+            false
+        }
+        View::Search(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Queue(s) => {
+            let _ = s;
+            render_queue_view(frame, app, area);
+            false
+        }
+    }
+}
+
+fn render_queue_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    // Use cached tracks resolved in tick() — no DB queries per frame
+    let active_index = app.player_cache.queue_index;
+    let skipped = app.player_cache.skipped_track_ids.clone();
+    let focused = matches!(app.focused_panel, FocusedPanel::Content);
+    // Borrow cached_queue_tracks and nav as separate fields so the borrow checker is happy
+    let tracks = &app.cached_queue_tracks;
+    if let View::Queue(s) = app.nav.current_mut() {
+        s.sync_selection(tracks.len(), active_index);
+        s.render(frame, area, tracks, active_index, &skipped, focused);
+    }
+}
+
+fn render_right_queue(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    let active_index = app.player_cache.queue_index;
+    let skipped = app.player_cache.skipped_track_ids.clone();
+    let tracks = &app.cached_queue_tracks;
+    let focused = matches!(app.focused_panel, FocusedPanel::RightPanel);
+
+    // Auto-scroll to active track only when the user is not navigating the panel
+    if !focused {
+        if tracks.is_empty() {
+            app.right_panel_queue_state.select(None);
+        } else {
+            app.right_panel_queue_state
+                .select(Some(active_index.min(tracks.len() - 1)));
+        }
+    }
+
+    crate::views::queue::render_panel(
+        frame,
+        area,
+        tracks,
+        active_index,
+        &skipped,
+        &mut app.right_panel_queue_state,
+        focused,
+        &app.queue_filter,
+    );
+}
+
+fn render_status(frame: &mut Frame, app: &AppState, area: Rect) {
+    let (text, style) = match &app.status {
+        Some(s) => {
+            let color = match s.kind {
+                StatusKind::Info => Color::Cyan,
+                StatusKind::Success => Color::Green,
+                StatusKind::Error => Color::Red,
+            };
+            (s.text.as_str(), Style::default().fg(color))
+        }
+        None => ("", Style::default().fg(Color::DarkGray)),
+    };
+    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+}
+
+fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    // Command bar
+    if app.input_mode == InputMode::Command {
+        command_bar::render(frame, area, &app.command_input, &app.command_completions);
+    }
+
+    // Text input dialog
+    if app.input_mode == InputMode::TextInput
+        && let Some(ref ctx) = app.text_input
+    {
+        input_dialog::render(frame, &ctx.prompt, &ctx.value);
+    }
+
+    // Confirm dialog
+    if app.input_mode == InputMode::Confirm
+        && let Some(ref ctx) = app.confirm
+    {
+        confirm_dialog::render(frame, &ctx.prompt);
+    }
+
+    // Playlist selector overlay
+    if app.show_playlist_selector {
+        render_playlist_selector(frame, app, area);
+    }
+
+    // Help overlay (always on top)
+    if app.show_help {
+        help_overlay::render(frame);
+    }
+}
+
+fn render_playlist_selector(frame: &mut Frame, app: &mut AppState, area: Rect) {
+    let playlists = app.playlists.list_playlists().unwrap_or_default();
+    let popup_area = centered_rect(50, 50, area);
+    frame.render_widget(Clear, popup_area);
+
+    let items: Vec<ListItem> = playlists
         .iter()
-        .enumerate()
-        .map(|(i, track)| {
-            let duration_secs = track.duration.as_secs();
-            let minutes = duration_secs / 60;
-            let seconds = duration_secs % 60;
-            let duration_str = format!("{minutes}:{seconds:02}");
-
-            let format_str = match track.file_type {
-                tornade_core::models::AudioFormat::Flac => "FLAC",
-                tornade_core::models::AudioFormat::Mp3 => "MP3",
-                tornade_core::models::AudioFormat::Aac => "AAC",
-                tornade_core::models::AudioFormat::Alac => "ALAC",
-            };
-
-            let format_info = format!(
-                "{} {} {}kHz",
-                format_str,
-                track
-                    .bit_depth
-                    .map(|d| format!("{d}bit"))
-                    .unwrap_or_default(),
-                track.sample_rate.unwrap_or(0) / 1000
-            );
-
-            let content = format!(
-                "{:3}. {} - Artist #{} [{}] {}",
-                i + 1,
-                track.title,
-                track.artist_id,
-                duration_str,
-                format_info
-            );
-
-            let style = if i == app.selected_index {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            ListItem::new(Line::from(Span::styled(content, style)))
-        })
+        .map(|p| ListItem::new(Line::from(Span::raw(p.name.as_str()))))
         .collect();
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Tracks ({}) ", app.tracks.len())),
-        )
+        .block(Block::default())
         .highlight_style(
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
-        );
+        )
+        .highlight_symbol("> ");
 
-    f.render_widget(list, area);
+    frame.render_stateful_widget(list, popup_area, &mut app.playlist_selector_state);
 }
 
-fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let help_text = if app.search_mode {
-        "ESC: Cancel │ ENTER: Search"
-    } else {
-        "↑/↓: Navigate │ ENTER/SPACE: Play │ /: Search │ Q: Quit"
-    };
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let width = r.width * percent_x / 100;
+    let height = r.height * percent_y / 100;
+    let x = r.x + (r.width.saturating_sub(width)) / 2;
+    let y = r.y + (r.height.saturating_sub(height)) / 2;
+    Rect {
+        x,
+        y,
+        width: width.min(r.width),
+        height: height.min(r.height),
+    }
+}
 
-    let footer = Paragraph::new(vec![
-        Line::from(Span::styled(
-            &app.status_message,
-            Style::default().fg(Color::Green),
-        )),
-        Line::from(Span::styled(
-            help_text,
-            Style::default().fg(Color::DarkGray),
-        )),
-    ])
-    .block(Block::default().borders(Borders::TOP));
+fn margin_rect(area: Rect, m: u16) -> Rect {
+    Rect {
+        x: area.x + m,
+        y: area.y + m,
+        width: area.width.saturating_sub(m * 2),
+        height: area.height.saturating_sub(m * 2),
+    }
+}
 
-    f.render_widget(footer, area);
+fn pad_h(area: Rect, p: u16) -> Rect {
+    Rect {
+        x: area.x + p,
+        y: area.y,
+        width: area.width.saturating_sub(p * 2),
+        height: area.height,
+    }
 }

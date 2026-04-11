@@ -8,14 +8,15 @@ name = "tornade-tui"
 path = "src/main.rs"
 
 [dependencies]
-# Terminal UI framework
-ratatui = "0.26"
-crossterm = "0.27"
+# Terminal UI framework (crossterm re-exported by ratatui 0.30 — no separate dep needed)
+ratatui = "0.30.0"
+ratatui-image = { version = "10.0.6", default-features = false, features = ["crossterm", "image-defaults"] }
+image = "~0.25"
 
 # Core library (git dependency — standalone repo)
-tornade-core = { git = "https://github.com/tornade-player/tornade-core", tag = "v0.3.0" }
+tornade-core = { git = "https://github.com/tornade-player/tornade-core", branch = "008-tui-feature-parity" }
 
-# Standalone dependencies (expanded from workspace)
+# Standalone dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
