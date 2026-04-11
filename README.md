@@ -1,5 +1,7 @@
 # tornade-tui
 
+![Tornade Tui Logo](https://github.com/tornade-player/tornade/blob/main/sources/tornade-core-icon.png)
+
 [![CI](https://github.com/tornade-player/tornade-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/tornade-player/tornade-tui/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
