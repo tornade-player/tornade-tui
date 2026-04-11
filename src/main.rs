@@ -11,7 +11,7 @@ use ratatui::crossterm::{
 use ratatui_image::picker::Picker;
 use tornade_core::{
     db,
-    services::{ArtworkService, LibraryService, PlaylistService, PlayerService, SearchService},
+    services::{ArtworkService, LibraryService, PlayerService, PlaylistService, SearchService},
     utils::AppPaths,
 };
 
@@ -46,7 +46,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
 
     // Build application state
-    let mut app = AppState::new(player, library, playlists, search_svc, artwork, paths, picker);
+    let mut app = AppState::new(
+        player, library, playlists, search_svc, artwork, paths, picker,
+    );
 
     // Setup terminal
     enable_raw_mode()?;
@@ -109,7 +111,13 @@ fn run_loop(
                 Event::Mouse(mouse) => {
                     // Only redraw on clicks, not mouse moves (moves fire constantly and are expensive)
                     use ratatui::crossterm::event::MouseEventKind;
-                    if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
+                    if matches!(
+                        mouse.kind,
+                        MouseEventKind::Down(_)
+                            | MouseEventKind::Up(_)
+                            | MouseEventKind::ScrollDown
+                            | MouseEventKind::ScrollUp
+                    ) {
                         events::handle_mouse(app, mouse);
                         needs_redraw = true;
                     }

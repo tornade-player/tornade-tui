@@ -1,17 +1,20 @@
-use std::time::Duration;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use tornade_core::{
-    models::RepeatMode,
-    services::PlaybackState,
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use std::time::Duration;
+use tornade_core::{models::RepeatMode, services::PlaybackState};
 
 use crate::{
-    app::{AppState, ConfirmAction, ConfirmCtx, FocusedPanel, InputMode, StatusKind, TextInputAction, TextInputCtx},
+    app::{
+        AppState, ConfirmAction, ConfirmCtx, FocusedPanel, InputMode, StatusKind, TextInputAction,
+        TextInputCtx,
+    },
     commands::{Command, completions},
     player::parse_seek_position,
     utils::expand_tilde,
     views::{
-        AlbumDetailState, ArtistDetailState, GenreDetailState, PlaylistDetailState, SidebarEntry, View,
+        AlbumDetailState, ArtistDetailState, GenreDetailState, PlaylistDetailState, SidebarEntry,
+        View,
     },
 };
 
@@ -24,11 +27,19 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
 
             // Player transport buttons
             let zones = app.player_hit_zones;
-            if zones.prev.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+            if zones
+                .prev
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
                 let _ = app.player.previous();
                 return;
             }
-            if zones.play_pause.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+            if zones
+                .play_pause
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
                 use tornade_core::services::PlaybackState;
                 if app.player_cache.state == PlaybackState::Playing {
                     let _ = app.player.pause();
@@ -37,21 +48,37 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 }
                 return;
             }
-            if zones.next.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+            if zones
+                .next
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
                 let _ = app.player.next();
                 return;
             }
             // Toolbar buttons (random / repeat / shuffle / add / remove)
             let tz = app.toolbar_hit_zones;
-            if tz.random.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+            if tz
+                .random
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
                 handle_add_random(app);
                 return;
             }
-            if tz.shuffle.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+            if tz
+                .shuffle
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
                 let _ = app.player.set_shuffle(!app.player_cache.shuffle);
                 return;
             }
-            if tz.repeat.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+            if tz
+                .repeat
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
                 let next = match app.player_cache.repeat {
                     RepeatMode::Off => RepeatMode::All,
                     RepeatMode::All => RepeatMode::One,
@@ -64,7 +91,11 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 handle_save_queue_as_playlist(app);
                 return;
             }
-            if tz.remove.map(|r| rect_contains(r, col, row)).unwrap_or(false) {
+            if tz
+                .remove
+                .map(|r| rect_contains(r, col, row))
+                .unwrap_or(false)
+            {
                 handle_clear_queue_confirm(app);
                 return;
             }
@@ -96,7 +127,11 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 s.list_area.and_then(|a| {
                     if rect_contains(a, col, row) {
                         let idx = (row - a.y) as usize + s.list_state.offset();
-                        if idx < s.display_tracks().len() { Some(idx) } else { None }
+                        if idx < s.display_tracks().len() {
+                            Some(idx)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -118,17 +153,27 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
 
             // Click on item in right-panel queue (single = select, double = play)
             let queue_click = app.right_queue_area.and_then(|area| {
-                if !rect_contains(area, col, row) { return None; }
+                if !rect_contains(area, col, row) {
+                    return None;
+                }
                 let offset = app.right_panel_queue_state.offset();
                 let rel = (row - area.y) as usize + offset;
                 let filter_lower = app.queue_filter.to_lowercase();
                 if app.queue_filter.is_empty() {
-                    if rel < app.cached_queue_tracks.len() { Some((rel, rel)) } else { None }
+                    if rel < app.cached_queue_tracks.len() {
+                        Some((rel, rel))
+                    } else {
+                        None
+                    }
                 } else {
-                    app.cached_queue_tracks.iter().enumerate()
+                    app.cached_queue_tracks
+                        .iter()
+                        .enumerate()
                         .filter(|(_, t)| {
                             t.title.to_lowercase().contains(&filter_lower)
-                                || t.artist_names.iter().any(|a| a.to_lowercase().contains(&filter_lower))
+                                || t.artist_names
+                                    .iter()
+                                    .any(|a| a.to_lowercase().contains(&filter_lower))
                         })
                         .nth(rel)
                         .map(|(orig, _)| (rel, orig))
@@ -156,7 +201,8 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
 /// Always records the current click as the last click.
 fn check_double_click(app: &mut AppState, col: u16, row: u16) -> bool {
     let now = std::time::Instant::now();
-    let is_double = app.last_click
+    let is_double = app
+        .last_click
         .map(|(lc, lr, ref lt)| lc == col && lr == row && lt.elapsed() < Duration::from_millis(400))
         .unwrap_or(false);
     app.last_click = Some((col, row, now));
@@ -241,7 +287,9 @@ pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
 
 fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
     if app.show_help {
-        if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) { app.show_help = false; }
+        if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
+            app.show_help = false;
+        }
         return false;
     }
 
@@ -287,7 +335,9 @@ fn handle_sidebar_focus(app: &mut AppState, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => app.focused_panel = FocusedPanel::Content,
         KeyCode::Char('j') | KeyCode::Down => {
-            if total > 0 { app.sidebar_cursor = (app.sidebar_cursor + 1).min(total - 1); }
+            if total > 0 {
+                app.sidebar_cursor = (app.sidebar_cursor + 1).min(total - 1);
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             app.sidebar_cursor = app.sidebar_cursor.saturating_sub(1);
@@ -315,15 +365,25 @@ fn handle_sidebar_focus(app: &mut AppState, key: KeyEvent) -> bool {
         }
         // Playback controls work from any panel
         KeyCode::Char(' ') => toggle_playback(app),
-        KeyCode::Char('n') => { let _ = app.player.next(); }
-        KeyCode::Char('N') => { let _ = app.player.previous(); }
+        KeyCode::Char('n') => {
+            let _ = app.player.next();
+        }
+        KeyCode::Char('N') => {
+            let _ = app.player.previous();
+        }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            let _ = app.player.set_volume((app.player_cache.volume + 0.05).min(1.0));
+            let _ = app
+                .player
+                .set_volume((app.player_cache.volume + 0.05).min(1.0));
         }
         KeyCode::Char('-') => {
-            let _ = app.player.set_volume((app.player_cache.volume - 0.05).max(0.0));
+            let _ = app
+                .player
+                .set_volume((app.player_cache.volume - 0.05).max(0.0));
         }
-        KeyCode::Char('S') => { let _ = app.player.set_shuffle(!app.player_cache.shuffle); }
+        KeyCode::Char('S') => {
+            let _ = app.player.set_shuffle(!app.player_cache.shuffle);
+        }
         KeyCode::Char('R') => {
             let next = match app.player_cache.repeat {
                 RepeatMode::Off => RepeatMode::All,
@@ -349,8 +409,12 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
             KeyCode::Enter => {
                 app.queue_filter_active = false;
             }
-            KeyCode::Backspace => { app.queue_filter.pop(); }
-            KeyCode::Char(c) => { app.queue_filter.push(c); }
+            KeyCode::Backspace => {
+                app.queue_filter.pop();
+            }
+            KeyCode::Char(c) => {
+                app.queue_filter.push(c);
+            }
             _ => {}
         }
         return false;
@@ -366,23 +430,33 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if queue_len > 0 {
-                let next = app.right_panel_queue_state.selected()
+                let next = app
+                    .right_panel_queue_state
+                    .selected()
                     .map(|i| (i + 1).min(queue_len - 1))
                     .unwrap_or(0);
                 app.right_panel_queue_state.select(Some(next));
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let prev = app.right_panel_queue_state.selected()
+            let prev = app
+                .right_panel_queue_state
+                .selected()
                 .map(|i| i.saturating_sub(1))
                 .unwrap_or(0);
-            if queue_len > 0 { app.right_panel_queue_state.select(Some(prev)); }
+            if queue_len > 0 {
+                app.right_panel_queue_state.select(Some(prev));
+            }
         }
         KeyCode::Char('g') => {
-            if queue_len > 0 { app.right_panel_queue_state.select(Some(0)); }
+            if queue_len > 0 {
+                app.right_panel_queue_state.select(Some(0));
+            }
         }
         KeyCode::Char('G') => {
-            if queue_len > 0 { app.right_panel_queue_state.select(Some(queue_len - 1)); }
+            if queue_len > 0 {
+                app.right_panel_queue_state.select(Some(queue_len - 1));
+            }
         }
         KeyCode::Enter => {
             if let Some(idx) = app.right_panel_queue_state.selected() {
@@ -394,15 +468,25 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
         }
         // Playback controls work from any panel
         KeyCode::Char(' ') => toggle_playback(app),
-        KeyCode::Char('n') => { let _ = app.player.next(); }
-        KeyCode::Char('N') => { let _ = app.player.previous(); }
+        KeyCode::Char('n') => {
+            let _ = app.player.next();
+        }
+        KeyCode::Char('N') => {
+            let _ = app.player.previous();
+        }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            let _ = app.player.set_volume((app.player_cache.volume + 0.05).min(1.0));
+            let _ = app
+                .player
+                .set_volume((app.player_cache.volume + 0.05).min(1.0));
         }
         KeyCode::Char('-') => {
-            let _ = app.player.set_volume((app.player_cache.volume - 0.05).max(0.0));
+            let _ = app
+                .player
+                .set_volume((app.player_cache.volume - 0.05).max(0.0));
         }
-        KeyCode::Char('S') => { let _ = app.player.set_shuffle(!app.player_cache.shuffle); }
+        KeyCode::Char('S') => {
+            let _ = app.player.set_shuffle(!app.player_cache.shuffle);
+        }
         KeyCode::Char('R') => {
             let next = match app.player_cache.repeat {
                 RepeatMode::Off => RepeatMode::All,
@@ -481,10 +565,14 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Char('j') | KeyCode::Down => move_down(app),
         KeyCode::Char('k') | KeyCode::Up => move_up(app),
         KeyCode::Char('h') | KeyCode::Left if matches!(app.nav.current(), View::Albums(_)) => {
-            if let View::Albums(s) = app.nav.current_mut() { s.move_left(); }
+            if let View::Albums(s) = app.nav.current_mut() {
+                s.move_left();
+            }
         }
         KeyCode::Char('l') | KeyCode::Right if matches!(app.nav.current(), View::Albums(_)) => {
-            if let View::Albums(s) = app.nav.current_mut() { s.move_right(); }
+            if let View::Albums(s) = app.nav.current_mut() {
+                s.move_right();
+            }
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => page_down(app),
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => page_up(app),
@@ -496,17 +584,33 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
 
         // ── Playback ──
         KeyCode::Char(' ') => toggle_playback(app),
-        KeyCode::Char('n') => { let _ = app.player.next(); }
-        KeyCode::Char('N') => { let _ = app.player.previous(); }
-        KeyCode::Char(']') => { let _ = app.player.seek(Duration::from_secs(10)); }
-        KeyCode::Char('[') => { let _ = app.player.seek(Duration::from_secs_f64((app.player_cache.position - 10.0).max(0.0))); }
+        KeyCode::Char('n') => {
+            let _ = app.player.next();
+        }
+        KeyCode::Char('N') => {
+            let _ = app.player.previous();
+        }
+        KeyCode::Char(']') => {
+            let _ = app.player.seek(Duration::from_secs(10));
+        }
+        KeyCode::Char('[') => {
+            let _ = app.player.seek(Duration::from_secs_f64(
+                (app.player_cache.position - 10.0).max(0.0),
+            ));
+        }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            let _ = app.player.set_volume((app.player_cache.volume + 0.05).min(1.0));
+            let _ = app
+                .player
+                .set_volume((app.player_cache.volume + 0.05).min(1.0));
         }
         KeyCode::Char('-') => {
-            let _ = app.player.set_volume((app.player_cache.volume - 0.05).max(0.0));
+            let _ = app
+                .player
+                .set_volume((app.player_cache.volume - 0.05).max(0.0));
         }
-        KeyCode::Char('S') => { let _ = app.player.set_shuffle(!app.player_cache.shuffle); }
+        KeyCode::Char('S') => {
+            let _ = app.player.set_shuffle(!app.player_cache.shuffle);
+        }
         KeyCode::Char('R') => {
             let next = match app.player_cache.repeat {
                 RepeatMode::Off => RepeatMode::All,
@@ -560,16 +664,23 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
 
 fn toggle_playback(app: &mut AppState) {
     match app.player_cache.state {
-        PlaybackState::Playing => { let _ = app.player.pause(); }
-        PlaybackState::Paused => { let _ = app.player.resume(); }
+        PlaybackState::Playing => {
+            let _ = app.player.pause();
+        }
+        PlaybackState::Paused => {
+            let _ = app.player.resume();
+        }
         PlaybackState::Stopped => app.play_from_current_view(),
     }
 }
 
 fn handle_enter(app: &mut AppState) {
     match app.nav.current() {
-        View::Library(_) | View::AlbumDetail(_) | View::GenreDetail(_)
-        | View::PlaylistDetail(_) | View::Queue(_) => {
+        View::Library(_)
+        | View::AlbumDetail(_)
+        | View::GenreDetail(_)
+        | View::PlaylistDetail(_)
+        | View::Queue(_) => {
             app.play_from_current_view();
         }
         View::Albums(_) => push_album_detail(app),
@@ -611,7 +722,10 @@ fn push_genre_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(genre) = genre {
-        app.nav.push(View::GenreDetail(GenreDetailState::new(genre, &app.library)));
+        app.nav.push(View::GenreDetail(GenreDetailState::new(
+            genre,
+            &app.library,
+        )));
     }
 }
 
@@ -621,7 +735,10 @@ fn push_playlist_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(playlist) = playlist {
-        app.nav.push(View::PlaylistDetail(PlaylistDetailState::new(playlist, &app.library)));
+        app.nav.push(View::PlaylistDetail(PlaylistDetailState::new(
+            playlist,
+            &app.library,
+        )));
     }
 }
 
@@ -639,7 +756,11 @@ fn push_album_from_artist(app: &mut AppState) {
 fn handle_search_enter(app: &mut AppState) {
     use crate::views::search::SearchSection;
     let (section, album, artist) = match app.nav.current() {
-        View::Search(s) => (s.section, s.selected_album().cloned(), s.selected_artist().cloned()),
+        View::Search(s) => (
+            s.section,
+            s.selected_album().cloned(),
+            s.selected_artist().cloned(),
+        ),
         _ => return,
     };
     match section {
@@ -653,7 +774,8 @@ fn handle_search_enter(app: &mut AppState) {
         SearchSection::Artists => {
             if let Some(artist) = artist {
                 let photo_dir = app.paths.artist_photo_dir();
-                let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
+                let state =
+                    ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
                 app.nav.push(View::ArtistDetail(state));
             }
         }
@@ -676,52 +798,77 @@ fn route_view_filter(app: &mut AppState, key: KeyEvent) -> bool {
     let is_active = match app.nav.current() {
         View::Library(s) => s.filter_active,
         View::Artists(s) => s.filter_active,
-        View::Albums(s)  => s.filter_active,
-        View::Genres(s)  => s.filter_active,
+        View::Albums(s) => s.filter_active,
+        View::Genres(s) => s.filter_active,
         _ => false,
     };
-    if !is_active { return false; }
+    if !is_active {
+        return false;
+    }
 
     // Genres use client-side filter; Library/Artists/Albums use DB search.
-    let is_db_search = matches!(app.nav.current(), View::Library(_) | View::Artists(_) | View::Albums(_));
+    let is_db_search = matches!(
+        app.nav.current(),
+        View::Library(_) | View::Artists(_) | View::Albums(_)
+    );
 
     match key.code {
-        KeyCode::Esc => {
-            match app.nav.current_mut() {
-                View::Library(s) => { s.filter_active = false; s.filter.clear(); }
-                View::Artists(s) => { s.filter_active = false; s.filter.clear(); }
-                View::Albums(s)  => { s.filter_active = false; s.filter.clear(); }
-                View::Genres(s)  => { s.filter_active = false; s.filter.clear(); }
-                _ => {}
+        KeyCode::Esc => match app.nav.current_mut() {
+            View::Library(s) => {
+                s.filter_active = false;
+                s.filter.clear();
             }
-        }
-        KeyCode::Enter => {
-            match app.nav.current_mut() {
-                View::Library(s) => s.filter_active = false,
-                View::Artists(s) => s.filter_active = false,
-                View::Albums(s)  => s.filter_active = false,
-                View::Genres(s)  => s.filter_active = false,
-                _ => {}
+            View::Artists(s) => {
+                s.filter_active = false;
+                s.filter.clear();
             }
-        }
-        KeyCode::Backspace => {
-            match app.nav.current_mut() {
-                View::Library(s) => { s.filter.pop(); }
-                View::Artists(s) => { s.filter.pop(); }
-                View::Albums(s)  => { s.filter.pop(); }
-                View::Genres(s)  => { s.filter.pop(); }
-                _ => {}
+            View::Albums(s) => {
+                s.filter_active = false;
+                s.filter.clear();
             }
-        }
-        KeyCode::Char(c) => {
-            match app.nav.current_mut() {
-                View::Library(s) => { s.filter.push(c); }
-                View::Artists(s) => { s.filter.push(c); }
-                View::Albums(s)  => { s.filter.push(c); }
-                View::Genres(s)  => { s.filter.push(c); }
-                _ => {}
+            View::Genres(s) => {
+                s.filter_active = false;
+                s.filter.clear();
             }
-        }
+            _ => {}
+        },
+        KeyCode::Enter => match app.nav.current_mut() {
+            View::Library(s) => s.filter_active = false,
+            View::Artists(s) => s.filter_active = false,
+            View::Albums(s) => s.filter_active = false,
+            View::Genres(s) => s.filter_active = false,
+            _ => {}
+        },
+        KeyCode::Backspace => match app.nav.current_mut() {
+            View::Library(s) => {
+                s.filter.pop();
+            }
+            View::Artists(s) => {
+                s.filter.pop();
+            }
+            View::Albums(s) => {
+                s.filter.pop();
+            }
+            View::Genres(s) => {
+                s.filter.pop();
+            }
+            _ => {}
+        },
+        KeyCode::Char(c) => match app.nav.current_mut() {
+            View::Library(s) => {
+                s.filter.push(c);
+            }
+            View::Artists(s) => {
+                s.filter.push(c);
+            }
+            View::Albums(s) => {
+                s.filter.push(c);
+            }
+            View::Genres(s) => {
+                s.filter.push(c);
+            }
+            _ => {}
+        },
         _ => {}
     }
 
@@ -749,7 +896,10 @@ fn handle_remove_selected(app: &mut AppState) {
                 let pid = s.playlist.id;
                 app.confirm = Some(ConfirmCtx {
                     prompt: "Remove track from playlist?".to_string(),
-                    action: ConfirmAction::RemoveFromPlaylist { playlist_id: pid, position: pos },
+                    action: ConfirmAction::RemoveFromPlaylist {
+                        playlist_id: pid,
+                        position: pos,
+                    },
                 });
                 app.input_mode = InputMode::Confirm;
             }
@@ -864,12 +1014,10 @@ fn handle_create_playlist(app: &mut AppState) {
 
 fn handle_add_random(app: &mut AppState) {
     match app.library.get_random_tracks(30) {
-        Ok(ids) if !ids.is_empty() => {
-            match app.player.add_to_queue(ids) {
-                Ok(_) => app.set_status("Added 30 random tracks", StatusKind::Success),
-                Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
-            }
-        }
+        Ok(ids) if !ids.is_empty() => match app.player.add_to_queue(ids) {
+            Ok(_) => app.set_status("Added 30 random tracks", StatusKind::Success),
+            Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+        },
         Ok(_) => app.set_status("No tracks in library", StatusKind::Info),
         Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
     }
@@ -950,12 +1098,20 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Esc | KeyCode::Char('q') => app.show_playlist_selector = false,
         KeyCode::Char('j') | KeyCode::Down => {
             if len > 0 {
-                let n = app.playlist_selector_state.selected().map(|i| (i + 1).min(len - 1)).unwrap_or(0);
+                let n = app
+                    .playlist_selector_state
+                    .selected()
+                    .map(|i| (i + 1).min(len - 1))
+                    .unwrap_or(0);
                 app.playlist_selector_state.select(Some(n));
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let p = app.playlist_selector_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
+            let p = app
+                .playlist_selector_state
+                .selected()
+                .map(|i| i.saturating_sub(1))
+                .unwrap_or(0);
             app.playlist_selector_state.select(Some(p));
         }
         KeyCode::Enter => {
@@ -1027,17 +1183,21 @@ fn execute_command(app: &mut AppState, input: &str) {
             });
             app.input_mode = InputMode::Confirm;
         }
-        Command::PlaylistCreate { name } => {
-            match app.playlists.create_playlist(&name, None) {
-                Ok(_) => {
-                    app.set_status(format!("Created playlist \"{}\"", name), StatusKind::Success);
-                    app.reload_current_view();
-                }
-                Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+        Command::PlaylistCreate { name } => match app.playlists.create_playlist(&name, None) {
+            Ok(_) => {
+                app.set_status(
+                    format!("Created playlist \"{}\"", name),
+                    StatusKind::Success,
+                );
+                app.reload_current_view();
             }
-        }
+            Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+        },
         Command::PlaylistDelete { name } => {
-            let id = app.playlists.list_playlists().ok()
+            let id = app
+                .playlists
+                .list_playlists()
+                .ok()
                 .and_then(|pls| pls.into_iter().find(|p| p.name == name).map(|p| p.id));
             if let Some(id) = id {
                 app.confirm = Some(ConfirmCtx {
@@ -1050,12 +1210,17 @@ fn execute_command(app: &mut AppState, input: &str) {
             }
         }
         Command::PlaylistAdd { name } => {
-            let id = app.playlists.list_playlists().ok()
+            let id = app
+                .playlists
+                .list_playlists()
+                .ok()
                 .and_then(|pls| pls.into_iter().find(|p| p.name == name).map(|p| p.id));
             if let Some(pid) = id {
                 if let Some(track_id) = app.selected_track_id() {
                     match app.playlists.add_tracks(pid, vec![track_id]) {
-                        Ok(_) => app.set_status(format!("Added to \"{}\"", name), StatusKind::Success),
+                        Ok(_) => {
+                            app.set_status(format!("Added to \"{}\"", name), StatusKind::Success)
+                        }
                         Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
                     }
                 }
@@ -1063,15 +1228,13 @@ fn execute_command(app: &mut AppState, input: &str) {
                 app.set_status(format!("Playlist not found: {}", name), StatusKind::Error);
             }
         }
-        Command::Import { path } => {
-            match app.playlists.import_m3u(&path) {
-                Ok(pl) => {
-                    app.set_status(format!("Imported \"{}\"", pl.name), StatusKind::Success);
-                    app.reload_current_view();
-                }
-                Err(e) => app.set_status(format!("Import error: {}", e), StatusKind::Error),
+        Command::Import { path } => match app.playlists.import_m3u(&path) {
+            Ok(pl) => {
+                app.set_status(format!("Imported \"{}\"", pl.name), StatusKind::Success);
+                app.reload_current_view();
             }
-        }
+            Err(e) => app.set_status(format!("Import error: {}", e), StatusKind::Error),
+        },
         Command::Seek { position_str } => {
             if let Some(dur) = parse_seek_position(&position_str) {
                 let _ = app.player.seek(dur);
@@ -1092,18 +1255,16 @@ fn execute_command(app: &mut AppState, input: &str) {
 fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
     let path = expand_tilde(&path.to_string_lossy());
     match app.library.add_source("Music", &path) {
-        Ok(source) => {
-            match app.library.scan_directory(&path, source.id) {
-                Ok(result) => {
-                    app.set_status(
-                        format!("Scan complete: {} tracks added", result.tracks_added),
-                        StatusKind::Success,
-                    );
-                    app.reload_current_view();
-                }
-                Err(e) => app.set_status(format!("Scan error: {}", e), StatusKind::Error),
+        Ok(source) => match app.library.scan_directory(&path, source.id) {
+            Ok(result) => {
+                app.set_status(
+                    format!("Scan complete: {} tracks added", result.tracks_added),
+                    StatusKind::Success,
+                );
+                app.reload_current_view();
             }
-        }
+            Err(e) => app.set_status(format!("Scan error: {}", e), StatusKind::Error),
+        },
         Err(e) => app.set_status(format!("Source error: {}", e), StatusKind::Error),
     }
 }
@@ -1219,12 +1380,10 @@ fn handle_confirm(app: &mut AppState, key: KeyEvent) {
 
 fn execute_confirm(app: &mut AppState, action: ConfirmAction) {
     match action {
-        ConfirmAction::ClearQueue => {
-            match app.player.clear_queue() {
-                Ok(_) => app.set_status("Queue cleared", StatusKind::Success),
-                Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
-            }
-        }
+        ConfirmAction::ClearQueue => match app.player.clear_queue() {
+            Ok(_) => app.set_status("Queue cleared", StatusKind::Success),
+            Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+        },
         ConfirmAction::DeletePlaylist { id } => {
             match app.playlists.delete_playlist(id) {
                 Ok(_) => {
@@ -1248,15 +1407,16 @@ fn execute_confirm(app: &mut AppState, action: ConfirmAction) {
                 }
             }
         }
-        ConfirmAction::RemoveFromPlaylist { playlist_id, position } => {
-            match app.playlists.remove_track(playlist_id, position) {
-                Ok(_) => {
-                    app.set_status("Removed from playlist", StatusKind::Success);
-                    reload_playlist_detail(app, playlist_id);
-                }
-                Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+        ConfirmAction::RemoveFromPlaylist {
+            playlist_id,
+            position,
+        } => match app.playlists.remove_track(playlist_id, position) {
+            Ok(_) => {
+                app.set_status("Removed from playlist", StatusKind::Success);
+                reload_playlist_detail(app, playlist_id);
             }
-        }
+            Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+        },
         ConfirmAction::LibraryCleanup => {
             app.set_status("Cleanup not available in this version", StatusKind::Info);
         }
@@ -1307,19 +1467,31 @@ fn page_down(app: &mut AppState) {
         View::Library(s) => s.page_down(),
         View::Albums(s) => s.page_down(),
         View::Artists(s) => s.page_down(),
-        View::GenreDetail(s) => { let n = s.list_state.selected().map(|i| (i + 10).min(s.tracks.len().saturating_sub(1))).unwrap_or(0); s.list_state.select(Some(n)); }
+        View::GenreDetail(s) => {
+            let n = s
+                .list_state
+                .selected()
+                .map(|i| (i + 10).min(s.tracks.len().saturating_sub(1)))
+                .unwrap_or(0);
+            s.list_state.select(Some(n));
+        }
         View::AlbumDetail(s) => {
             let len = s.tracks.len();
             if len > 0 {
-                let n = s.list_state.selected().map(|i| (i + 10).min(len - 1)).unwrap_or(0);
+                let n = s
+                    .list_state
+                    .selected()
+                    .map(|i| (i + 10).min(len - 1))
+                    .unwrap_or(0);
                 s.list_state.select(Some(n));
             }
         }
         View::Queue(s) => {
             let len = app.player_cache.queue.len();
-            s.move_down(len.saturating_sub(1).min(
-                s.list_state.selected().map(|i| i + 10).unwrap_or(10)
-            ));
+            s.move_down(
+                len.saturating_sub(1)
+                    .min(s.list_state.selected().map(|i| i + 10).unwrap_or(10)),
+            );
         }
         _ => {}
     }
@@ -1330,13 +1502,28 @@ fn page_up(app: &mut AppState) {
         View::Library(s) => s.page_up(),
         View::Albums(s) => s.page_up(),
         View::Artists(s) => s.page_up(),
-        View::GenreDetail(s) => { let p = s.list_state.selected().map(|i| i.saturating_sub(10)).unwrap_or(0); s.list_state.select(Some(p)); }
+        View::GenreDetail(s) => {
+            let p = s
+                .list_state
+                .selected()
+                .map(|i| i.saturating_sub(10))
+                .unwrap_or(0);
+            s.list_state.select(Some(p));
+        }
         View::AlbumDetail(s) => {
-            let p = s.list_state.selected().map(|i| i.saturating_sub(10)).unwrap_or(0);
+            let p = s
+                .list_state
+                .selected()
+                .map(|i| i.saturating_sub(10))
+                .unwrap_or(0);
             s.list_state.select(Some(p));
         }
         View::Queue(s) => {
-            let p = s.list_state.selected().map(|i| i.saturating_sub(10)).unwrap_or(0);
+            let p = s
+                .list_state
+                .selected()
+                .map(|i| i.saturating_sub(10))
+                .unwrap_or(0);
             s.list_state.select(Some(p));
         }
         _ => {}

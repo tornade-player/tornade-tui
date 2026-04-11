@@ -1,9 +1,21 @@
-use std::path::Path;
-use image::{DynamicImage, Rgba};
-use ratatui::{Frame, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState}};
-use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
-use tornade_core::{models::{Album, Artist}, services::LibraryService};
 use crate::utils::truncate;
+use image::{DynamicImage, Rgba};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{
+        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
+};
+use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
+use std::path::Path;
+use tornade_core::{
+    models::{Album, Artist},
+    services::LibraryService,
+};
 
 pub struct ArtistDetailState {
     pub artist: Artist,
@@ -33,31 +45,71 @@ fn apply_circle_mask(img: DynamicImage) -> DynamicImage {
 }
 
 impl ArtistDetailState {
-    pub fn new(artist: Artist, library: &LibraryService, picker: &mut Picker, photo_dir: &Path) -> Self {
+    pub fn new(
+        artist: Artist,
+        library: &LibraryService,
+        picker: &mut Picker,
+        photo_dir: &Path,
+    ) -> Self {
         let albums = library.get_artist_albums(artist.id).unwrap_or_default();
         let mut list_state = ListState::default();
-        if !albums.is_empty() { list_state.select(Some(0)); }
+        if !albums.is_empty() {
+            list_state.select(Some(0));
+        }
 
         let photo_path = photo_dir.join(format!("{}.jpg", artist.id));
         let image_state = if photo_path.exists() {
-            image::open(&photo_path).ok()
+            image::open(&photo_path)
+                .ok()
                 .map(|img| apply_circle_mask(img))
                 .map(|img| picker.new_resize_protocol(img))
         } else {
             None
         };
 
-        Self { artist, albums, list_state, image_state, scrollbar_state: ScrollbarState::default() }
+        Self {
+            artist,
+            albums,
+            list_state,
+            image_state,
+            scrollbar_state: ScrollbarState::default(),
+        }
     }
 
     pub fn selected_album(&self) -> Option<&Album> {
         self.list_state.selected().and_then(|i| self.albums.get(i))
     }
 
-    pub fn move_down(&mut self) { let len = self.albums.len(); if len == 0 { return; } let n = self.list_state.selected().map(|i| (i+1).min(len-1)).unwrap_or(0); self.list_state.select(Some(n)); }
-    pub fn move_up(&mut self) { let p = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0); self.list_state.select(Some(p)); }
-    pub fn jump_top(&mut self) { if !self.albums.is_empty() { self.list_state.select(Some(0)); } }
-    pub fn jump_bottom(&mut self) { if !self.albums.is_empty() { self.list_state.select(Some(self.albums.len()-1)); } }
+    pub fn move_down(&mut self) {
+        let len = self.albums.len();
+        if len == 0 {
+            return;
+        }
+        let n = self
+            .list_state
+            .selected()
+            .map(|i| (i + 1).min(len - 1))
+            .unwrap_or(0);
+        self.list_state.select(Some(n));
+    }
+    pub fn move_up(&mut self) {
+        let p = self
+            .list_state
+            .selected()
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or(0);
+        self.list_state.select(Some(p));
+    }
+    pub fn jump_top(&mut self) {
+        if !self.albums.is_empty() {
+            self.list_state.select(Some(0));
+        }
+    }
+    pub fn jump_bottom(&mut self) {
+        if !self.albums.is_empty() {
+            self.list_state.select(Some(self.albums.len() - 1));
+        }
+    }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let header_height = if self.image_state.is_some() { 10 } else { 4 };
@@ -68,16 +120,25 @@ impl ArtistDetailState {
 
         self.render_header(frame, chunks[0]);
 
-        let items: Vec<ListItem> = self.albums.iter().map(|a| {
-            let year = a.year.map(|y| format!("  {}", y)).unwrap_or_default();
-            ListItem::new(Line::from(vec![
-                Span::raw(format!("{:<45} ", truncate(&a.title, 44))),
-                Span::styled(year, Style::default().fg(Color::DarkGray)),
-            ]))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .albums
+            .iter()
+            .map(|a| {
+                let year = a.year.map(|y| format!("  {}", y)).unwrap_or_default();
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:<45} ", truncate(&a.title, 44))),
+                    Span::styled(year, Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect();
 
         let (hl_style, hl_sym) = if focused {
-            (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
+            (
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+                "> ",
+            )
         } else {
             (Style::default().fg(Color::DarkGray), "  ")
         };
@@ -104,12 +165,18 @@ impl ArtistDetailState {
                 .split(area);
 
             // Circle image - rendered directly, no border
-            frame.render_stateful_widget(StatefulImage::new().resize(ratatui_image::Resize::Fit(None)), h_chunks[0], protocol);
+            frame.render_stateful_widget(
+                StatefulImage::new().resize(ratatui_image::Resize::Fit(None)),
+                h_chunks[0],
+                protocol,
+            );
 
             let meta = Paragraph::new(vec![
                 Line::from(Span::styled(
                     truncate(&self.artist.name, 50),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
                     format!("{} albums", self.albums.len()),
@@ -120,8 +187,16 @@ impl ArtistDetailState {
             frame.render_widget(meta, h_chunks[1]);
         } else {
             let header = Paragraph::new(vec![
-                Line::from(Span::styled(truncate(&self.artist.name, 60), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled(format!("{} albums", self.albums.len()), Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(
+                    truncate(&self.artist.name, 60),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    format!("{} albums", self.albums.len()),
+                    Style::default().fg(Color::DarkGray),
+                )),
             ])
             .block(Block::default());
             frame.render_widget(header, area);

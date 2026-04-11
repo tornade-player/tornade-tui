@@ -26,7 +26,12 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
             .style(Style::default().fg(Color::Yellow))
             .alignment(ratatui::layout::Alignment::Center);
         let y = full_area.height / 2;
-        let area = Rect { x: full_area.x, y, width: full_area.width, height: 1 };
+        let area = Rect {
+            x: full_area.x,
+            y,
+            width: full_area.width,
+            height: 1,
+        };
         frame.render_widget(p, area);
         return;
     }
@@ -55,7 +60,8 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         _ => None,
     };
     sidebar::render(
-        frame, sidebar_area,
+        frame,
+        sidebar_area,
         app.nav.current().sidebar_entry(),
         active_playlist_id,
         matches!(app.focused_panel, FocusedPanel::Sidebar),
@@ -85,15 +91,25 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
 
     app.right_queue_area = Some(right_chunks[1]);
     crate::views::queue::render_filter_bar(
-        frame, right_chunks[0], &app.queue_filter, app.queue_filter_active,
+        frame,
+        right_chunks[0],
+        &app.queue_filter,
+        app.queue_filter_active,
     );
     render_right_queue(frame, app, right_chunks[1]);
     app.toolbar_hit_zones = crate::views::queue::render_toolbar(
-        frame, right_chunks[2], app.player_cache.shuffle, &app.player_cache.repeat,
+        frame,
+        right_chunks[2],
+        app.player_cache.shuffle,
+        &app.player_cache.repeat,
     );
     let album_name = app.current_album_name.as_deref();
     app.player_hit_zones = player_bar::render(
-        frame, right_chunks[3], &app.player_cache, app.player_artwork.as_mut(), album_name,
+        frame,
+        right_chunks[3],
+        &app.player_cache,
+        app.player_artwork.as_mut(),
+        album_name,
     );
 
     // 4. Overlays (rendered on top)
@@ -104,17 +120,47 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
 fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
     match app.nav.current_mut() {
-        View::Library(s) => { s.render(frame, area, focused); false }
+        View::Library(s) => {
+            s.render(frame, area, focused);
+            false
+        }
         View::Albums(s) => s.render(frame, area, focused, &mut app.picker),
-        View::Artists(s) => { s.render(frame, area, focused); false }
-        View::Genres(s) => { s.render(frame, area, focused); false }
-        View::Playlists(s) => { s.render(frame, area, focused); false }
-        View::AlbumDetail(s) => { s.render(frame, area, focused); false }
-        View::ArtistDetail(s) => { s.render(frame, area, focused); false }
-        View::GenreDetail(s) => { s.render(frame, area, focused); false }
-        View::PlaylistDetail(s) => { s.render(frame, area, focused); false }
-        View::Scan(s) => { s.render(frame, area); false }
-        View::Search(s) => { s.render(frame, area, focused); false }
+        View::Artists(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Genres(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Playlists(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::AlbumDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::ArtistDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::GenreDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::PlaylistDetail(s) => {
+            s.render(frame, area, focused);
+            false
+        }
+        View::Scan(s) => {
+            s.render(frame, area);
+            false
+        }
+        View::Search(s) => {
+            s.render(frame, area, focused);
+            false
+        }
         View::Queue(s) => {
             let _ = s;
             render_queue_view(frame, app, area);
@@ -147,7 +193,8 @@ fn render_right_queue(frame: &mut Frame, app: &mut AppState, area: Rect) {
         if tracks.is_empty() {
             app.right_panel_queue_state.select(None);
         } else {
-            app.right_panel_queue_state.select(Some(active_index.min(tracks.len() - 1)));
+            app.right_panel_queue_state
+                .select(Some(active_index.min(tracks.len() - 1)));
         }
     }
 
@@ -214,13 +261,18 @@ fn render_playlist_selector(frame: &mut Frame, app: &mut AppState, area: Rect) {
     let popup_area = centered_rect(50, 50, area);
     frame.render_widget(Clear, popup_area);
 
-    let items: Vec<ListItem> = playlists.iter().map(|p| {
-        ListItem::new(Line::from(Span::raw(p.name.as_str())))
-    }).collect();
+    let items: Vec<ListItem> = playlists
+        .iter()
+        .map(|p| ListItem::new(Line::from(Span::raw(p.name.as_str()))))
+        .collect();
 
     let list = List::new(items)
         .block(Block::default())
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("> ");
 
     frame.render_stateful_widget(list, popup_area, &mut app.playlist_selector_state);
@@ -231,7 +283,12 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let height = r.height * percent_y / 100;
     let x = r.x + (r.width.saturating_sub(width)) / 2;
     let y = r.y + (r.height.saturating_sub(height)) / 2;
-    Rect { x, y, width: width.min(r.width), height: height.min(r.height) }
+    Rect {
+        x,
+        y,
+        width: width.min(r.width),
+        height: height.min(r.height),
+    }
 }
 
 fn margin_rect(area: Rect, m: u16) -> Rect {

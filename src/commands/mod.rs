@@ -1,8 +1,8 @@
 pub mod completions;
 
-use std::path::PathBuf;
 use crate::utils::expand_tilde;
 use crate::views::SidebarEntry;
+use std::path::PathBuf;
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -39,16 +39,16 @@ impl Command {
                 if rest.is_empty() {
                     Self::Unknown("scan requires a path: :scan <path>".to_string())
                 } else {
-                    Self::Scan { path: expand_tilde(rest) }
+                    Self::Scan {
+                        path: expand_tilde(rest),
+                    }
                 }
             }
             "cleanup" => Self::Cleanup,
-            "rate" => {
-                match rest.parse::<u8>() {
-                    Ok(n) if n <= 5 => Self::Rate { stars: n },
-                    _ => Self::Unknown("rate requires 0-5: :rate <0-5>".to_string()),
-                }
-            }
+            "rate" => match rest.parse::<u8>() {
+                Ok(n) if n <= 5 => Self::Rate { stars: n },
+                _ => Self::Unknown("rate requires 0-5: :rate <0-5>".to_string()),
+            },
             "queue" => match rest.to_lowercase().as_str() {
                 "add" => Self::QueueAdd,
                 "clear" => Self::QueueClear,
@@ -57,9 +57,15 @@ impl Command {
             "playlist" => {
                 let (subcmd, name) = rest.split_once(' ').unwrap_or((rest, ""));
                 match subcmd.to_lowercase().as_str() {
-                    "create" if !name.is_empty() => Self::PlaylistCreate { name: name.to_string() },
-                    "delete" if !name.is_empty() => Self::PlaylistDelete { name: name.to_string() },
-                    "add" if !name.is_empty() => Self::PlaylistAdd { name: name.to_string() },
+                    "create" if !name.is_empty() => Self::PlaylistCreate {
+                        name: name.to_string(),
+                    },
+                    "delete" if !name.is_empty() => Self::PlaylistDelete {
+                        name: name.to_string(),
+                    },
+                    "add" if !name.is_empty() => Self::PlaylistAdd {
+                        name: name.to_string(),
+                    },
                     _ => Self::Unknown(format!("unknown playlist subcommand: {}", rest)),
                 }
             }
@@ -67,14 +73,18 @@ impl Command {
                 if rest.is_empty() {
                     Self::Unknown("import requires a path: :import <path>".to_string())
                 } else {
-                    Self::Import { path: expand_tilde(rest) }
+                    Self::Import {
+                        path: expand_tilde(rest),
+                    }
                 }
             }
             "seek" => {
                 if rest.is_empty() {
                     Self::Unknown("seek requires a position: :seek <mm:ss>".to_string())
                 } else {
-                    Self::Seek { position_str: rest.to_string() }
+                    Self::Seek {
+                        position_str: rest.to_string(),
+                    }
                 }
             }
             "help" => Self::Help,
@@ -95,7 +105,10 @@ mod tests {
 
     #[test]
     fn parse_scan() {
-        assert!(matches!(Command::parse("scan ~/Music"), Command::Scan { .. }));
+        assert!(matches!(
+            Command::parse("scan ~/Music"),
+            Command::Scan { .. }
+        ));
     }
 
     #[test]
@@ -130,18 +143,28 @@ mod tests {
     fn parse_playlist_create() {
         assert_eq!(
             Command::parse("playlist create My Mix"),
-            Command::PlaylistCreate { name: "My Mix".to_string() }
+            Command::PlaylistCreate {
+                name: "My Mix".to_string()
+            }
         );
     }
 
     #[test]
     fn parse_playlist_no_name() {
-        assert!(matches!(Command::parse("playlist create"), Command::Unknown(_)));
+        assert!(matches!(
+            Command::parse("playlist create"),
+            Command::Unknown(_)
+        ));
     }
 
     #[test]
     fn parse_seek() {
-        assert_eq!(Command::parse("seek 1:30"), Command::Seek { position_str: "1:30".to_string() });
+        assert_eq!(
+            Command::parse("seek 1:30"),
+            Command::Seek {
+                position_str: "1:30".to_string()
+            }
+        );
     }
 
     #[test]
@@ -151,8 +174,14 @@ mod tests {
 
     #[test]
     fn parse_navigate() {
-        assert_eq!(Command::parse("albums"), Command::Navigate(SidebarEntry::Albums));
-        assert_eq!(Command::parse("tracks"), Command::Navigate(SidebarEntry::Tracks));
+        assert_eq!(
+            Command::parse("albums"),
+            Command::Navigate(SidebarEntry::Albums)
+        );
+        assert_eq!(
+            Command::parse("tracks"),
+            Command::Navigate(SidebarEntry::Tracks)
+        );
     }
 
     #[test]
@@ -163,6 +192,9 @@ mod tests {
 
     #[test]
     fn parse_import() {
-        assert!(matches!(Command::parse("import /path/to/file.m3u"), Command::Import { .. }));
+        assert!(matches!(
+            Command::parse("import /path/to/file.m3u"),
+            Command::Import { .. }
+        ));
     }
 }

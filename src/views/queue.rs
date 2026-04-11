@@ -1,3 +1,4 @@
+use crate::utils::{format_duration, truncate};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -6,7 +7,6 @@ use ratatui::{
     widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use tornade_core::models::{RepeatMode, Track};
-use crate::utils::{format_duration, truncate};
 
 /// 1-row filter bar at the top of the right panel.
 pub fn render_filter_bar(frame: &mut Frame, area: Rect, filter: &str, active: bool) {
@@ -70,7 +70,7 @@ pub fn render_toolbar(
     .split(area);
 
     let buttons: [(&str, Color); 5] = [
-        ("\u{f522}", col_dim),      // nf-fa-random
+        ("\u{f522}", col_dim), // nf-fa-random
         (repeat_icon, repeat_col),
         ("⇄", shuffle_col),
         ("⊕", col_dim),
@@ -96,11 +96,11 @@ pub fn render_toolbar(
     }
 
     ToolbarHitZones {
-        random:  Some(cells[0]),
-        repeat:  Some(cells[1]),
+        random: Some(cells[0]),
+        repeat: Some(cells[1]),
         shuffle: Some(cells[2]),
-        add:     Some(cells[3]),
-        remove:  Some(cells[4]),
+        add: Some(cells[3]),
+        remove: Some(cells[4]),
     }
 }
 
@@ -144,23 +144,25 @@ pub fn render_panel(
             let line = Line::from(vec![
                 Span::styled(
                     format!("{:>3}. {}", orig_idx + 1, indicator),
-                    Style::default()
-                        .fg(if is_active { Color::Cyan } else { Color::DarkGray }),
+                    Style::default().fg(if is_active {
+                        Color::Cyan
+                    } else {
+                        Color::DarkGray
+                    }),
                 ),
                 Span::raw(format!(
                     "{:<width$} ",
                     truncate(&t.title, title_w),
                     width = title_w
                 )),
-                Span::styled(
-                    format!("{:>5}", dur),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("{:>5}", dur), Style::default().fg(Color::DarkGray)),
             ]);
             let style = if is_skipped {
                 Style::default().fg(Color::Red)
             } else if is_active {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -169,7 +171,9 @@ pub fn render_panel(
         .collect();
 
     let hl_style = if focused {
-        Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -252,23 +256,25 @@ impl QueueState {
                 let line = Line::from(vec![
                     Span::styled(
                         format!("{:>3}. {}", i + 1, indicator),
-                        Style::default()
-                            .fg(if is_active { Color::Cyan } else { Color::DarkGray }),
+                        Style::default().fg(if is_active {
+                            Color::Cyan
+                        } else {
+                            Color::DarkGray
+                        }),
                     ),
                     Span::raw(format!("{:<38} ", truncate(&t.title, 37))),
                     Span::styled(
                         format!("{:<22} ", truncate(&artist, 21)),
                         Style::default().fg(Color::Gray),
                     ),
-                    Span::styled(
-                        format!("{:>5}", dur),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled(format!("{:>5}", dur), Style::default().fg(Color::DarkGray)),
                 ]);
                 let style = if is_skipped {
                     Style::default().fg(Color::Red)
                 } else if is_active {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };

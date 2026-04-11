@@ -25,11 +25,15 @@ impl NavigationStack {
     }
 
     pub fn current(&self) -> &View {
-        self.stack.last().expect("stack always has at least one item")
+        self.stack
+            .last()
+            .expect("stack always has at least one item")
     }
 
     pub fn current_mut(&mut self) -> &mut View {
-        self.stack.last_mut().expect("stack always has at least one item")
+        self.stack
+            .last_mut()
+            .expect("stack always has at least one item")
     }
 
     /// Replace the entire stack with a new root view (sidebar navigation).

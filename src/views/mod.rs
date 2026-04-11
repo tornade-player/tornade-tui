@@ -1,28 +1,28 @@
-pub mod library;
-pub mod albums;
 pub mod album_detail;
-pub mod artists;
+pub mod albums;
 pub mod artist_detail;
-pub mod genres;
+pub mod artists;
 pub mod genre_detail;
-pub mod playlists;
+pub mod genres;
+pub mod library;
 pub mod playlist_detail;
+pub mod playlists;
 pub mod queue;
-pub mod search;
 pub mod scan;
+pub mod search;
 
-pub use library::LibraryState;
-pub use albums::AlbumsState;
 pub use album_detail::AlbumDetailState;
-pub use artists::ArtistsState;
+pub use albums::AlbumsState;
 pub use artist_detail::ArtistDetailState;
-pub use genres::GenresState;
+pub use artists::ArtistsState;
 pub use genre_detail::GenreDetailState;
-pub use playlists::PlaylistsState;
+pub use genres::GenresState;
+pub use library::LibraryState;
 pub use playlist_detail::PlaylistDetailState;
+pub use playlists::PlaylistsState;
 pub use queue::QueueState;
-pub use search::SearchState;
 pub use scan::ScanState;
+pub use search::SearchState;
 
 /// All possible views that can appear on the navigation stack.
 pub enum View {
@@ -68,13 +68,13 @@ impl SidebarEntry {
     /// Nerd Font glyph for this entry (nf-fa-* range, single codepoint).
     pub fn glyph(&self) -> &'static str {
         match self {
-            Self::Search => "\u{f002}",     // nf-fa-search
-            Self::Tracks => "\u{f001}",     // nf-fa-music
-            Self::Albums => "\u{f51f}",     // nf-fa-compact_disc
-            Self::Artists => "\u{f007}",    // nf-fa-user
-            Self::Genres => "\u{f02b}",     // nf-fa-tag
-            Self::Playlists => "\u{f03a}",  // nf-fa-list
-            Self::Queue => "\u{f0cb}",      // nf-fa-list_ol
+            Self::Search => "\u{f002}",    // nf-fa-search
+            Self::Tracks => "\u{f001}",    // nf-fa-music
+            Self::Albums => "\u{f51f}",    // nf-fa-compact_disc
+            Self::Artists => "\u{f007}",   // nf-fa-user
+            Self::Genres => "\u{f02b}",    // nf-fa-tag
+            Self::Playlists => "\u{f03a}", // nf-fa-list
+            Self::Queue => "\u{f0cb}",     // nf-fa-list_ol
         }
     }
 
@@ -104,7 +104,13 @@ impl SidebarEntry {
     /// Library entries in sidebar order. Playlists are shown
     /// separately as dynamic items below the "Playlists" header.
     pub fn all() -> &'static [SidebarEntry] {
-        &[Self::Tracks, Self::Albums, Self::Artists, Self::Genres, Self::Search]
+        &[
+            Self::Tracks,
+            Self::Albums,
+            Self::Artists,
+            Self::Genres,
+            Self::Search,
+        ]
     }
 }
 

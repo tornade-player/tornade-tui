@@ -1,5 +1,4 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use crate::utils::truncate;
 use image::Rgba;
 use ratatui::{
     Frame,
@@ -9,8 +8,9 @@ use ratatui::{
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use tornade_core::{models::Album, services::LibraryService};
-use crate::utils::truncate;
 
 // Image height in terminal rows (fixed); width is computed from font metrics to make it square
 const IMG_H: u16 = 8;
@@ -83,12 +83,12 @@ fn apply_rounded_corners(img: image::DynamicImage) -> image::DynamicImage {
         for x in 0..w {
             let fx = x as f32;
             let fy = y as f32;
-            let in_corner =
-                (fx < r && fy < r && (fx - r).hypot(fy - r) > r) ||
-                (fx > fw - r - 1.0 && fy < r && (fx - (fw - r - 1.0)).hypot(fy - r) > r) ||
-                (fx < r && fy > fh - r - 1.0 && (fx - r).hypot(fy - (fh - r - 1.0)) > r) ||
-                (fx > fw - r - 1.0 && fy > fh - r - 1.0 &&
-                    (fx - (fw - r - 1.0)).hypot(fy - (fh - r - 1.0)) > r);
+            let in_corner = (fx < r && fy < r && (fx - r).hypot(fy - r) > r)
+                || (fx > fw - r - 1.0 && fy < r && (fx - (fw - r - 1.0)).hypot(fy - r) > r)
+                || (fx < r && fy > fh - r - 1.0 && (fx - r).hypot(fy - (fh - r - 1.0)) > r)
+                || (fx > fw - r - 1.0
+                    && fy > fh - r - 1.0
+                    && (fx - (fw - r - 1.0)).hypot(fy - (fh - r - 1.0)) > r);
             if in_corner {
                 rgba.put_pixel(x, y, Rgba([0, 0, 0, 0]));
             }
@@ -99,7 +99,9 @@ fn apply_rounded_corners(img: image::DynamicImage) -> image::DynamicImage {
 
 impl AlbumsState {
     pub fn load(&mut self, library: &LibraryService) {
-        self.albums = library.list_albums(None, None, None, Some(5000), Some(0)).unwrap_or_default();
+        self.albums = library
+            .list_albums(None, None, None, Some(5000), Some(0))
+            .unwrap_or_default();
     }
 
     pub fn display_albums(&self) -> &[Album] {
@@ -117,7 +119,9 @@ impl AlbumsState {
         }
         let col = ((x - a.x) / self.cell_stride_w) as usize;
         let row_in_view = ((y - a.y) / self.cell_stride_h) as usize;
-        if col >= self.cols { return None; }
+        if col >= self.cols {
+            return None;
+        }
         let row = self.scroll_row + row_in_view;
         let idx = row * self.cols + col;
         let total = self.display_albums().len();
@@ -126,7 +130,9 @@ impl AlbumsState {
 
     pub fn move_right(&mut self) {
         let len = self.display_albums().len();
-        if len > 0 { self.selected = (self.selected + 1).min(len - 1); }
+        if len > 0 {
+            self.selected = (self.selected + 1).min(len - 1);
+        }
     }
 
     pub fn move_left(&mut self) {
@@ -135,7 +141,9 @@ impl AlbumsState {
 
     pub fn move_down(&mut self) {
         let len = self.display_albums().len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         self.selected = (self.selected + self.cols).min(len - 1);
     }
 
@@ -145,7 +153,9 @@ impl AlbumsState {
 
     pub fn page_down(&mut self) {
         let len = self.display_albums().len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         self.selected = (self.selected + self.cols * 3).min(len - 1);
     }
 
@@ -153,17 +163,33 @@ impl AlbumsState {
         self.selected = self.selected.saturating_sub(self.cols * 3);
     }
 
-    pub fn jump_top(&mut self) { self.selected = 0; self.scroll_row = 0; }
+    pub fn jump_top(&mut self) {
+        self.selected = 0;
+        self.scroll_row = 0;
+    }
 
     pub fn jump_bottom(&mut self) {
         let len = self.display_albums().len();
-        if len > 0 { self.selected = len - 1; }
+        if len > 0 {
+            self.selected = len - 1;
+        }
     }
 
     /// Render the albums grid. Returns `true` when background image loads are still in progress
     /// (caller should redraw soon).
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) -> bool {
-        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)]).split(area);
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        picker: &mut Picker,
+    ) -> bool {
+        let chunks = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(area);
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
         let area = chunks[2];
 
@@ -190,11 +216,18 @@ impl AlbumsState {
         let rows_visible = ((grid_area.height / self.cell_stride_h) as usize).max(1);
 
         let total = self.display_albums().len();
-        if total > 0 && self.selected >= total { self.selected = total - 1; }
+        if total > 0 && self.selected >= total {
+            self.selected = total - 1;
+        }
 
-        let sel_row = if self.cols > 0 { self.selected / self.cols } else { 0 };
-        if sel_row < self.scroll_row { self.scroll_row = sel_row; }
-        else if sel_row >= self.scroll_row + rows_visible {
+        let sel_row = if self.cols > 0 {
+            self.selected / self.cols
+        } else {
+            0
+        };
+        if sel_row < self.scroll_row {
+            self.scroll_row = sel_row;
+        } else if sel_row >= self.scroll_row + rows_visible {
             self.scroll_row = sel_row + 1 - rows_visible;
         }
 
@@ -203,14 +236,32 @@ impl AlbumsState {
         let end = ((self.scroll_row + rows_visible) * self.cols).min(total);
 
         // Collect visible album data (owned) to release the immutable borrow on self
-        type AlbumTuple = (usize, i64, String, String, Option<u16>,
-                           Option<std::path::PathBuf>, Option<std::path::PathBuf>);
+        type AlbumTuple = (
+            usize,
+            i64,
+            String,
+            String,
+            Option<u16>,
+            Option<std::path::PathBuf>,
+            Option<std::path::PathBuf>,
+        );
         let visible: Vec<AlbumTuple> = {
             let filtered = self.display_albums();
-            filtered[start..end].iter().enumerate().map(|(i, a)| (
-                start + i, a.id, a.title.clone(), a.artist_name.clone(), a.year,
-                a.online_artwork_path.clone(), a.artwork_path.clone(),
-            )).collect()
+            filtered[start..end]
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    (
+                        start + i,
+                        a.id,
+                        a.title.clone(),
+                        a.artist_name.clone(),
+                        a.year,
+                        a.online_artwork_path.clone(),
+                        a.artwork_path.clone(),
+                    )
+                })
+                .collect()
         };
 
         // 1. Drain images decoded by background threads → encode into StatefulProtocol
@@ -229,7 +280,9 @@ impl AlbumsState {
         let target_px_w = (self.img_cols as u32) * (fw as u32);
         let target_px_h = (IMG_H as u32) * (fh as u32);
         for (_, id, _, _, _, online, local) in &visible {
-            if self.image_cache.contains_key(id) || self.loading_ids.contains(id) { continue; }
+            if self.image_cache.contains_key(id) || self.loading_ids.contains(id) {
+                continue;
+            }
             let path = online.as_ref().or(local.as_ref()).cloned();
             if let Some(path) = path {
                 self.loading_ids.insert(*id);
@@ -238,7 +291,8 @@ impl AlbumsState {
                 std::thread::spawn(move || {
                     if let Ok(img) = image::open(&path) {
                         let img = img.resize_to_fill(
-                            target_px_w.max(1), target_px_h.max(1),
+                            target_px_w.max(1),
+                            target_px_h.max(1),
                             image::imageops::FilterType::Triangle,
                         );
                         let img = apply_rounded_corners(img);
@@ -252,7 +306,11 @@ impl AlbumsState {
 
         // Whether any images are still pending (loading or waiting to be encoded)
         let has_pending = !self.loading_ids.is_empty()
-            || self.pending_decoded.try_lock().map(|g| !g.is_empty()).unwrap_or(true);
+            || self
+                .pending_decoded
+                .try_lock()
+                .map(|g| !g.is_empty())
+                .unwrap_or(true);
 
         let img_cols = self.img_cols;
         let cell_stride_w = self.cell_stride_w;
@@ -262,19 +320,30 @@ impl AlbumsState {
         for (flat_idx, id, title, artist, year, _, _) in &visible {
             let row = flat_idx / self.cols;
             let col = flat_idx % self.cols;
-            if row >= self.scroll_row + rows_visible || row >= total_rows { continue; }
+            if row >= self.scroll_row + rows_visible || row >= total_rows {
+                continue;
+            }
 
             let x = grid_area.x + (col as u16) * cell_stride_w;
             let y = grid_area.y + ((row - self.scroll_row) as u16) * cell_stride_h;
-            if x >= grid_area.x + grid_area.width || y >= grid_area.y + grid_area.height { continue; }
+            if x >= grid_area.x + grid_area.width || y >= grid_area.y + grid_area.height {
+                continue;
+            }
 
             let w = img_cols.min(grid_area.x + grid_area.width - x);
             let h = (IMG_H + TEXT_PADDING + TEXT_H).min(grid_area.y + grid_area.height - y);
-            let cell_rect = Rect { x, y, width: w, height: h };
+            let cell_rect = Rect {
+                x,
+                y,
+                width: w,
+                height: h,
+            };
 
             let is_sel = *flat_idx == self.selected;
             let protocol = self.image_cache.get_mut(id);
-            render_cell(frame, cell_rect, title, artist, *year, is_sel, focused, protocol, img_cols);
+            render_cell(
+                frame, cell_rect, title, artist, *year, is_sel, focused, protocol, img_cols,
+            );
         }
 
         // 4. Scrollbar
@@ -307,10 +376,19 @@ fn render_cell(
 ) {
     let img_h = IMG_H.min(area.height);
     let img_w = img_cols.min(area.width);
-    let img_rect = Rect { width: img_w, height: img_h, ..area };
+    let img_rect = Rect {
+        width: img_w,
+        height: img_h,
+        ..area
+    };
     let text_y = area.y + img_h + TEXT_PADDING;
     let text_h = area.height.saturating_sub(img_h + TEXT_PADDING);
-    let text_rect = Rect { y: text_y, height: text_h, width: img_w, x: area.x };
+    let text_rect = Rect {
+        y: text_y,
+        height: text_h,
+        width: img_w,
+        x: area.x,
+    };
 
     if let Some(proto) = protocol {
         frame.render_stateful_widget(
@@ -325,10 +403,14 @@ fn render_cell(
         );
     }
 
-    if text_rect.height == 0 { return; }
+    if text_rect.height == 0 {
+        return;
+    }
 
     let title_style = if is_selected && focused {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Gray)
     };
@@ -336,7 +418,10 @@ fn render_cell(
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled(truncate(title, max_w), title_style)),
-            Line::from(Span::styled(truncate(artist, max_w), Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled(
+                truncate(artist, max_w),
+                Style::default().fg(Color::DarkGray),
+            )),
             Line::from(Span::styled(
                 year.map(|y| y.to_string()).unwrap_or_default(),
                 Style::default().fg(Color::DarkGray),
@@ -349,10 +434,23 @@ fn render_cell(
 fn render_search_bar(frame: &mut Frame, area: Rect, filter: &str, active: bool) {
     let cursor = if active { "_" } else { "" };
     let (text, style) = if filter.is_empty() && !active {
-        ("\u{f002}  Search...".to_string(), Style::default().fg(Color::DarkGray))
+        (
+            "\u{f002}  Search...".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )
     } else {
-        (format!("\u{f002}  {}{}", filter, cursor), Style::default().fg(Color::White))
+        (
+            format!("\u{f002}  {}{}", filter, cursor),
+            Style::default().fg(Color::White),
+        )
     };
-    let bg = if active { Style::default().bg(Color::Rgb(40, 42, 54)) } else { Style::default() };
-    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))).style(bg), area);
+    let bg = if active {
+        Style::default().bg(Color::Rgb(40, 42, 54))
+    } else {
+        Style::default()
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text, style))).style(bg),
+        area,
+    );
 }

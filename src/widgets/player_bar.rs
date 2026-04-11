@@ -1,3 +1,5 @@
+use crate::player::PlayerStateCache;
+use crate::utils::{format_duration, truncate};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -8,8 +10,6 @@ use ratatui::{
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 use tornade_core::models::AudioFormat;
 use tornade_core::services::PlaybackState;
-use crate::player::PlayerStateCache;
-use crate::utils::{format_duration, truncate};
 
 /// Hit zones for player buttons — positions relative to the player area.
 /// Stored in AppState so the mouse handler can use them.
@@ -36,11 +36,7 @@ pub fn render(
     }
 
     // Vertical: [top: artwork+info+vol (fills)] | [bottom: controls+progress (1 row)]
-    let vert = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    let vert = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
 
     // Top horizontal: [artwork 10] | [gap 1] | [info] | [volume 7]
     let top = Layout::horizontal([
@@ -115,9 +111,9 @@ pub fn render(
 
     // Transport: spread prev / play / next across the full artwork width (3+4+3=10)
     let transport = Layout::horizontal([
-        Constraint::Length(3),  // ◀◀
-        Constraint::Length(4),  // ▶/⏸  (wider = more prominent)
-        Constraint::Length(3),  // ▶▶
+        Constraint::Length(3), // ◀◀
+        Constraint::Length(4), // ▶/⏸  (wider = more prominent)
+        Constraint::Length(3), // ▶▶
     ])
     .split(bottom[0]);
 
@@ -137,7 +133,9 @@ pub fn render(
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             play_icon,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )))
         .alignment(Alignment::Center),
         transport[1],
@@ -208,7 +206,11 @@ fn render_volume_knob(frame: &mut Frame, area: Rect, pct: u8) {
         width: area.width.min(7),
         height: 4,
     };
-    let col = if pct > 0 { Color::Cyan } else { Color::DarkGray };
+    let col = if pct > 0 {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled("╭────╮", Style::default().fg(col))),

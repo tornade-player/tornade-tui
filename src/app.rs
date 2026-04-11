@@ -1,20 +1,22 @@
-use std::time::Instant;
-use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
-use tornade_core::{
-    models::Track,
-    services::{ArtworkService, LibraryService, PlaybackState, PlaylistService, PlayerService, SearchService},
-    utils::AppPaths,
-};
 use crate::{
     navigation::NavigationStack,
     player::PlayerStateCache,
-    views::{
-        View, SidebarEntry,
-        LibraryState, AlbumsState, ArtistsState, GenresState, PlaylistsState,
-        PlaylistDetailState, QueueState, SearchState,
-    },
     views::queue::ToolbarHitZones,
+    views::{
+        AlbumsState, ArtistsState, GenresState, LibraryState, PlaylistDetailState, PlaylistsState,
+        QueueState, SearchState, SidebarEntry, View,
+    },
     widgets::player_bar::PlayerHitZones,
+};
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
+use std::time::Instant;
+use tornade_core::{
+    models::Track,
+    services::{
+        ArtworkService, LibraryService, PlaybackState, PlayerService, PlaylistService,
+        SearchService,
+    },
+    utils::AppPaths,
 };
 
 /// Which of the three panels currently has keyboard focus.
@@ -38,7 +40,11 @@ pub enum InputMode {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum StatusKind { Info, Success, Error }
+pub enum StatusKind {
+    Info,
+    Success,
+    Error,
+}
 
 pub struct StatusMessage {
     pub text: String,
@@ -226,7 +232,9 @@ impl AppState {
             if let Some(album_id) = track.album_id {
                 if let Ok(Some(album)) = self.library.get_album(album_id) {
                     self.current_album_name = Some(album.title.clone());
-                    let path = album.online_artwork_path.as_ref()
+                    let path = album
+                        .online_artwork_path
+                        .as_ref()
                         .or(album.artwork_path.as_ref())
                         .cloned();
                     self.player_artwork = path
@@ -265,7 +273,9 @@ impl AppState {
             return;
         }
         self.cached_queue_ids = self.player_cache.queue.clone();
-        self.cached_queue_tracks = self.cached_queue_ids.iter()
+        self.cached_queue_tracks = self
+            .cached_queue_ids
+            .iter()
             .filter_map(|&id| self.library.get_track(id).ok().flatten())
             .collect();
     }
@@ -315,16 +325,27 @@ impl AppState {
                     _ => None,
                 };
                 active_id
-                    .and_then(|id| self.sidebar_playlists.iter().position(|(pid, _)| *pid == id))
+                    .and_then(|id| {
+                        self.sidebar_playlists
+                            .iter()
+                            .position(|(pid, _)| *pid == id)
+                    })
                     .map(|idx| SidebarEntry::all().len() + idx)
                     .unwrap_or(0)
             }
-            other => SidebarEntry::all().iter().position(|e| *e == other).unwrap_or(0),
+            other => SidebarEntry::all()
+                .iter()
+                .position(|e| *e == other)
+                .unwrap_or(0),
         };
     }
 
     pub fn set_status(&mut self, text: impl Into<String>, kind: StatusKind) {
-        self.status = Some(StatusMessage { text: text.into(), kind, set_at: Instant::now() });
+        self.status = Some(StatusMessage {
+            text: text.into(),
+            kind,
+            set_at: Instant::now(),
+        });
     }
 
     pub fn navigate_to(&mut self, entry: SidebarEntry) {
@@ -348,32 +369,63 @@ impl AppState {
         let query = match self.nav.current() {
             View::Library(s) if s.filter_active && !s.filter.is_empty() => s.filter.clone(),
             View::Artists(s) if s.filter_active && !s.filter.is_empty() => s.filter.clone(),
-            View::Albums(s)  if s.filter_active && !s.filter.is_empty() => s.filter.clone(),
-            View::Library(s) if s.filter.is_empty() => { let _ = s; String::new() }
-            View::Artists(s) if s.filter.is_empty() => { let _ = s; String::new() }
-            View::Albums(s)  if s.filter.is_empty() => { let _ = s; String::new() }
+            View::Albums(s) if s.filter_active && !s.filter.is_empty() => s.filter.clone(),
+            View::Library(s) if s.filter.is_empty() => {
+                let _ = s;
+                String::new()
+            }
+            View::Artists(s) if s.filter.is_empty() => {
+                let _ = s;
+                String::new()
+            }
+            View::Albums(s) if s.filter.is_empty() => {
+                let _ = s;
+                String::new()
+            }
             _ => return,
         };
 
         if query.is_empty() {
             match self.nav.current_mut() {
-                View::Library(s) => { s.search_results = None; s.list_state.select(if s.tracks.is_empty() { None } else { Some(0) }); }
-                View::Artists(s) => { s.search_results = None; s.list_state.select(if s.artists.is_empty() { None } else { Some(0) }); }
-                View::Albums(s)  => { s.search_results = None; s.selected = 0; s.scroll_row = 0; }
+                View::Library(s) => {
+                    s.search_results = None;
+                    s.list_state
+                        .select(if s.tracks.is_empty() { None } else { Some(0) });
+                }
+                View::Artists(s) => {
+                    s.search_results = None;
+                    s.list_state
+                        .select(if s.artists.is_empty() { None } else { Some(0) });
+                }
+                View::Albums(s) => {
+                    s.search_results = None;
+                    s.selected = 0;
+                    s.scroll_row = 0;
+                }
                 _ => {}
             }
             return;
         }
 
-        let Ok(results) = self.search_svc.search(&query) else { return };
+        let Ok(results) = self.search_svc.search(&query) else {
+            return;
+        };
 
         match self.nav.current_mut() {
             View::Library(s) => {
-                s.list_state.select(if results.tracks.is_empty() { None } else { Some(0) });
+                s.list_state.select(if results.tracks.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
                 s.search_results = Some(results.tracks);
             }
             View::Artists(s) => {
-                s.list_state.select(if results.artists.is_empty() { None } else { Some(0) });
+                s.list_state.select(if results.artists.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
                 s.search_results = Some(results.artists);
             }
             View::Albums(s) => {
@@ -423,10 +475,14 @@ impl AppState {
             View::Library(s) => (s.visible_track_ids(), s.list_state.selected().unwrap_or(0)),
             View::AlbumDetail(s) => (s.visible_track_ids(), s.list_state.selected().unwrap_or(0)),
             View::GenreDetail(s) => (s.visible_track_ids(), s.list_state.selected().unwrap_or(0)),
-            View::PlaylistDetail(s) => (s.visible_track_ids(), s.list_state.selected().unwrap_or(0)),
+            View::PlaylistDetail(s) => {
+                (s.visible_track_ids(), s.list_state.selected().unwrap_or(0))
+            }
             _ => return,
         };
-        if ids.is_empty() { return; }
+        if ids.is_empty() {
+            return;
+        }
         crate::player::play_from_context(&mut self.player, ids, index);
     }
 
@@ -444,7 +500,11 @@ impl AppState {
             match self.library.rate_track(id, stars) {
                 Ok(_) => {
                     self.set_status(
-                        format!("Rated: {}{}", "★".repeat(stars as usize), "☆".repeat(5 - stars as usize)),
+                        format!(
+                            "Rated: {}{}",
+                            "★".repeat(stars as usize),
+                            "☆".repeat(5 - stars as usize)
+                        ),
                         StatusKind::Success,
                     );
                     self.reload_current_view();

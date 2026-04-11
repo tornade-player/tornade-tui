@@ -1,6 +1,12 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState}};
-use tornade_core::{models::Playlist, services::PlaylistService};
 use crate::utils::truncate;
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, List, ListItem, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState},
+};
+use tornade_core::{models::Playlist, services::PlaylistService};
 
 pub struct PlaylistsState {
     pub playlists: Vec<Playlist>,
@@ -10,7 +16,11 @@ pub struct PlaylistsState {
 
 impl Default for PlaylistsState {
     fn default() -> Self {
-        Self { playlists: Vec::new(), list_state: ListState::default(), scrollbar_state: ScrollbarState::default() }
+        Self {
+            playlists: Vec::new(),
+            list_state: ListState::default(),
+            scrollbar_state: ScrollbarState::default(),
+        }
     }
 }
 
@@ -23,23 +33,63 @@ impl PlaylistsState {
     }
 
     pub fn selected_playlist(&self) -> Option<&Playlist> {
-        self.list_state.selected().and_then(|i| self.playlists.get(i))
+        self.list_state
+            .selected()
+            .and_then(|i| self.playlists.get(i))
     }
 
-    pub fn move_down(&mut self) { let len = self.playlists.len(); if len == 0 { return; } let n = self.list_state.selected().map(|i| (i+1).min(len-1)).unwrap_or(0); self.list_state.select(Some(n)); }
-    pub fn move_up(&mut self) { let p = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0); self.list_state.select(Some(p)); }
-    pub fn jump_top(&mut self) { if !self.playlists.is_empty() { self.list_state.select(Some(0)); } }
-    pub fn jump_bottom(&mut self) { if !self.playlists.is_empty() { self.list_state.select(Some(self.playlists.len()-1)); } }
+    pub fn move_down(&mut self) {
+        let len = self.playlists.len();
+        if len == 0 {
+            return;
+        }
+        let n = self
+            .list_state
+            .selected()
+            .map(|i| (i + 1).min(len - 1))
+            .unwrap_or(0);
+        self.list_state.select(Some(n));
+    }
+    pub fn move_up(&mut self) {
+        let p = self
+            .list_state
+            .selected()
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or(0);
+        self.list_state.select(Some(p));
+    }
+    pub fn jump_top(&mut self) {
+        if !self.playlists.is_empty() {
+            self.list_state.select(Some(0));
+        }
+    }
+    pub fn jump_bottom(&mut self) {
+        if !self.playlists.is_empty() {
+            self.list_state.select(Some(self.playlists.len() - 1));
+        }
+    }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
-        let items: Vec<ListItem> = self.playlists.iter().map(|p| {
-            ListItem::new(Line::from(vec![
-                Span::raw(format!("{:<40} ", truncate(&p.name, 39))),
-                Span::styled(format!("{} tracks", p.tracks.len()), Style::default().fg(Color::DarkGray)),
-            ]))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .playlists
+            .iter()
+            .map(|p| {
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:<40} ", truncate(&p.name, 39))),
+                    Span::styled(
+                        format!("{} tracks", p.tracks.len()),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
+            })
+            .collect();
         let (hl_style, hl_sym) = if focused {
-            (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
+            (
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+                "> ",
+            )
         } else {
             (Style::default().fg(Color::DarkGray), "  ")
         };
