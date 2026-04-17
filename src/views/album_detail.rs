@@ -115,9 +115,9 @@ impl AlbumDetailState {
             vertical: 1,
         });
 
-        // Image: fixed square (width x width), About directly below, rest empty
-        let img_h = padded.width; // square
+        // Image: square capped so the About section always has room to show
         let about_rows = self.about_row_count() as u16 + 2;
+        let img_h = padded.width.min(padded.height.saturating_sub(about_rows));
 
         let v = Layout::vertical([
             Constraint::Length(img_h),
