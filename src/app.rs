@@ -443,8 +443,8 @@ impl AppState {
         match self.nav.current_mut() {
             View::Library(s) => s.load(&self.library),
             View::Albums(s) => s.load(&self.library),
-            View::Artists(s) => s.load(&self.library),
-            View::Genres(s) => s.load(&self.library),
+            View::Artists(s) => s.load(&self.library, &mut self.picker),
+            View::Genres(s) => s.load(&self.library, &mut self.picker),
             View::Playlists(s) => s.load(&self.playlists),
             _ => {}
         }

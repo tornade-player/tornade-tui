@@ -1,4 +1,5 @@
 use crate::utils::truncate;
+use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -9,7 +10,13 @@ use ratatui::{
         ScrollbarState,
     },
 };
+use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use tornade_core::{models::Genre, services::LibraryService};
+
+/// Height in terminal rows for each genre row (image height).
+const ROW_HEIGHT: u16 = 4;
+/// Width reserved for the mosaic image.
+const IMG_WIDTH: u16 = 8;
 
 #[derive(Default)]
 pub struct GenresState {
@@ -17,15 +24,36 @@ pub struct GenresState {
     pub filter: String,
     pub filter_active: bool,
     pub list_state: ListState,
+    /// Pre-built mosaic image protocol per genre, indexed parallel to `genres`.
+    image_states: Vec<Option<StatefulProtocol>>,
     scrollbar_state: ScrollbarState,
 }
 
 impl GenresState {
-    pub fn load(&mut self, library: &LibraryService) {
+    pub fn load(&mut self, library: &LibraryService, picker: &mut Picker) {
         self.genres = library.list_genres().unwrap_or_default();
         if self.list_state.selected().is_none() && !self.genres.is_empty() {
             self.list_state.select(Some(0));
         }
+
+        // Build a 2x2 mosaic for each genre
+        self.image_states = self
+            .genres
+            .iter()
+            .map(|(g, _, _)| {
+                let paths = library.get_genre_artwork_paths(g.id, 4).unwrap_or_default();
+                if paths.is_empty() {
+                    return None;
+                }
+                let images: Vec<DynamicImage> =
+                    paths.iter().filter_map(|p| image::open(p).ok()).collect();
+                if images.is_empty() {
+                    return None;
+                }
+                let mosaic = build_mosaic(&images, 128);
+                Some(picker.new_resize_protocol(DynamicImage::ImageRgba8(mosaic)))
+            })
+            .collect();
     }
 
     pub fn filtered_genres(&self) -> Vec<&(Genre, u32, u32)> {
@@ -90,38 +118,54 @@ impl GenresState {
 
         let filtered = self.filtered_genres();
         let filtered_len = filtered.len();
-        let items: Vec<ListItem> = filtered
-            .iter()
-            .map(|(g, tracks, albums)| {
-                ListItem::new(Line::from(vec![
-                    Span::raw(format!("{:<40} ", truncate(&g.name, 39))),
-                    Span::styled(
-                        format!("{} tracks", tracks),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::styled(
-                        format!("  {} albums", albums),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ]))
-            })
-            .collect();
-        drop(filtered);
-        let (hl_style, hl_sym) = if focused {
-            (
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
-                "> ",
-            )
+        let selected = self.list_state.selected().unwrap_or(0);
+
+        let has_images = self.image_states.iter().any(|s| s.is_some());
+        let has_filter = !self.filter.is_empty();
+
+        if has_images && !has_filter && IMG_WIDTH + 2 < area.width {
+            // Build filtered indices into self.genres for image lookup
+            let orig_indices: Vec<usize> = filtered
+                .iter()
+                .filter_map(|fg| self.genres.iter().position(|(g, _, _)| g.id == fg.0.id))
+                .collect();
+            let names: Vec<String> = filtered.iter().map(|(g, _, _)| g.name.clone()).collect();
+            drop(filtered);
+            self.render_with_images(frame, chunks[2], &names, &orig_indices, selected, focused);
         } else {
-            (Style::default().fg(Color::DarkGray), "  ")
-        };
-        let list = List::new(items)
-            .block(Block::default())
-            .highlight_style(hl_style)
-            .highlight_symbol(hl_sym);
-        frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
+            let items: Vec<ListItem> = filtered
+                .iter()
+                .map(|(g, tracks, albums)| {
+                    ListItem::new(Line::from(vec![
+                        Span::raw(format!("{:<40} ", truncate(&g.name, 39))),
+                        Span::styled(
+                            format!("{} tracks", tracks),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            format!("  {} albums", albums),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]))
+                })
+                .collect();
+            drop(filtered);
+            let (hl_style, hl_sym) = if focused {
+                (
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
+                    "> ",
+                )
+            } else {
+                (Style::default().fg(Color::DarkGray), "  ")
+            };
+            let list = List::new(items)
+                .block(Block::default())
+                .highlight_style(hl_style)
+                .highlight_symbol(hl_sym);
+            frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
+        }
 
         let pos = self.list_state.selected().unwrap_or(0);
         self.scrollbar_state = ScrollbarState::new(filtered_len).position(pos);
@@ -131,6 +175,112 @@ impl GenresState {
             &mut self.scrollbar_state,
         );
     }
+
+    fn render_with_images(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        names: &[String],
+        orig_indices: &[usize],
+        selected: usize,
+        focused: bool,
+    ) {
+        if area.height == 0 || names.is_empty() {
+            return;
+        }
+
+        let rows_visible = (area.height / ROW_HEIGHT) as usize;
+        let scroll_offset = selected.saturating_sub(rows_visible.saturating_sub(1));
+        let end = (scroll_offset + rows_visible + 1).min(names.len());
+
+        let mut y = area.y;
+        for rel_idx in scroll_offset..end {
+            let is_selected = rel_idx == selected;
+            let row_area = Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: ROW_HEIGHT.min(area.y + area.height - y),
+            };
+            if row_area.height == 0 {
+                break;
+            }
+
+            if is_selected && focused {
+                frame.render_widget(
+                    Block::default().style(Style::default().bg(Color::Rgb(40, 42, 54))),
+                    row_area,
+                );
+            }
+
+            let cols = Layout::horizontal([Constraint::Length(IMG_WIDTH), Constraint::Min(0)])
+                .split(row_area);
+
+            // Mosaic image on the left
+            let orig_idx = orig_indices.get(rel_idx).copied().unwrap_or(rel_idx);
+            if let Some(Some(proto)) = self.image_states.get_mut(orig_idx) {
+                frame.render_stateful_widget(StatefulImage::new(), cols[0], proto);
+            } else {
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        " ♪ ",
+                        Style::default().fg(Color::DarkGray),
+                    ))),
+                    cols[0],
+                );
+            }
+
+            // Genre name on the right, vertically centered
+            let name_w = (cols[1].width as usize).saturating_sub(2);
+            let name_style = if is_selected && focused {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            let prefix = if is_selected && focused { "> " } else { "  " };
+            let name_area = Rect {
+                x: cols[1].x,
+                y: cols[1].y + ROW_HEIGHT / 2,
+                width: cols[1].width,
+                height: 1,
+            };
+            let name = names.get(rel_idx).map(|s| s.as_str()).unwrap_or("");
+            if name_area.y < area.y + area.height {
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        format!("{}{}", prefix, truncate(name, name_w)),
+                        name_style,
+                    ))),
+                    name_area,
+                );
+            }
+
+            y += ROW_HEIGHT;
+        }
+    }
+}
+
+/// Build a 2x2 mosaic of `size x size` pixels from up to 4 images.
+/// Missing tiles are filled with a dark background color.
+fn build_mosaic(images: &[DynamicImage], size: u32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let tile = size / 2;
+    let mut canvas = ImageBuffer::from_pixel(size, size, Rgba([30u8, 30, 30, 255]));
+
+    let positions = [(0u32, 0u32), (tile, 0), (0, tile), (tile, tile)];
+
+    for (i, (ox, oy)) in positions.iter().enumerate() {
+        if let Some(img) = images.get(i) {
+            let resized = img.resize_exact(tile, tile, image::imageops::FilterType::Lanczos3);
+            for (px, py, pixel) in resized.pixels() {
+                if *ox + px < size && *oy + py < size {
+                    canvas.put_pixel(*ox + px, *oy + py, pixel);
+                }
+            }
+        }
+    }
+    canvas
 }
 
 fn render_search_bar(frame: &mut Frame, area: Rect, filter: &str, active: bool) {

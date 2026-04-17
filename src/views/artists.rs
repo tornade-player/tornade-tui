@@ -9,8 +9,14 @@ use ratatui::{
         ScrollbarState,
     },
 };
+use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use tornade_core::models::Artist;
 use tornade_core::services::LibraryService;
+
+/// Height in terminal rows for each artist row (image height).
+const ROW_HEIGHT: u16 = 4;
+/// Width reserved for the artist photo (cols).
+const IMG_WIDTH: u16 = 8;
 
 #[derive(Default)]
 pub struct ArtistsState {
@@ -19,15 +25,28 @@ pub struct ArtistsState {
     pub list_state: ListState,
     pub filter: String,
     pub filter_active: bool,
+    /// Pre-loaded image protocols indexed parallel to `artists`.
+    image_states: Vec<Option<StatefulProtocol>>,
     scrollbar_state: ScrollbarState,
 }
 
 impl ArtistsState {
-    pub fn load(&mut self, library: &LibraryService) {
+    pub fn load(&mut self, library: &LibraryService, picker: &mut Picker) {
         self.artists = library.list_artists().unwrap_or_default();
         if self.list_state.selected().is_none() && !self.artists.is_empty() {
             self.list_state.select(Some(0));
         }
+        // Load photo for each artist (None if no photo_path or load fails).
+        self.image_states = self
+            .artists
+            .iter()
+            .map(|a| {
+                a.photo_path
+                    .as_ref()
+                    .and_then(|p| image::open(p).ok())
+                    .map(|img| picker.new_resize_protocol(img))
+            })
+            .collect();
     }
 
     pub fn display_artists(&self) -> &[Artist] {
@@ -102,6 +121,129 @@ impl ArtistsState {
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
 
         let display: Vec<Artist> = self.display_artists().to_vec();
+        let display_len = display.len();
+
+        // Check if any artist in the visible range has a photo
+        let selected = self.list_state.selected().unwrap_or(0);
+        let has_images = display.iter().any(|a| a.photo_path.is_some());
+
+        if has_images && IMG_WIDTH + 2 < area.width {
+            self.render_with_images(frame, chunks[2], &display, selected, focused);
+        } else {
+            self.render_text_only(frame, chunks[2], &display, focused);
+        }
+
+        let pos = self.list_state.selected().unwrap_or(0);
+        self.scrollbar_state = ScrollbarState::new(display_len).position(pos);
+        frame.render_stateful_widget(
+            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
+            chunks[2],
+            &mut self.scrollbar_state,
+        );
+    }
+
+    /// Render with photo thumbnails: each artist occupies ROW_HEIGHT rows.
+    fn render_with_images(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        display: &[Artist],
+        selected: usize,
+        focused: bool,
+    ) {
+        if area.height == 0 {
+            return;
+        }
+
+        // Determine visible range based on scroll offset
+        let rows_visible = (area.height / ROW_HEIGHT) as usize;
+        let scroll_offset = selected.saturating_sub(rows_visible.saturating_sub(1));
+        let end = (scroll_offset + rows_visible + 1).min(display.len());
+        let visible = &display[scroll_offset..end];
+
+        let mut y = area.y;
+        for (rel_idx, artist) in visible.iter().enumerate() {
+            let abs_idx = scroll_offset + rel_idx;
+            let is_selected = abs_idx == selected;
+            let row_area = Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: ROW_HEIGHT.min(area.y + area.height - y),
+            };
+            if row_area.height == 0 {
+                break;
+            }
+
+            // Highlight background for selected row
+            if is_selected && focused {
+                frame.render_widget(
+                    Block::default().style(Style::default().bg(Color::Rgb(40, 42, 54))),
+                    row_area,
+                );
+            }
+
+            let cols = Layout::horizontal([Constraint::Length(IMG_WIDTH), Constraint::Min(0)])
+                .split(row_area);
+
+            // Image on the left
+            let img_area = cols[0];
+            let orig_idx = self
+                .artists
+                .iter()
+                .position(|a| a.id == artist.id)
+                .unwrap_or(abs_idx);
+            if let Some(Some(proto)) = self.image_states.get_mut(orig_idx) {
+                frame.render_stateful_widget(StatefulImage::new(), img_area, proto);
+            } else {
+                // Placeholder
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        " ♪ ",
+                        Style::default().fg(Color::DarkGray),
+                    ))),
+                    img_area,
+                );
+            }
+
+            // Name on the right, vertically centered
+            let name_w = (cols[1].width as usize).saturating_sub(2);
+            let name_style = if is_selected && focused {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            let prefix = if is_selected && focused { "> " } else { "  " };
+            let name_area = Rect {
+                x: cols[1].x,
+                y: cols[1].y + ROW_HEIGHT / 2,
+                width: cols[1].width,
+                height: 1,
+            };
+            if name_area.y < area.y + area.height {
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        format!("{}{}", prefix, truncate(&artist.name, name_w)),
+                        name_style,
+                    ))),
+                    name_area,
+                );
+            }
+
+            y += ROW_HEIGHT;
+        }
+    }
+
+    /// Fallback: render as a plain text list (no images available).
+    fn render_text_only(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        display: &[Artist],
+        focused: bool,
+    ) {
         let items: Vec<ListItem> = display
             .iter()
             .map(|a| ListItem::new(Line::from(Span::raw(truncate(&a.name, 60)))))
@@ -120,15 +262,7 @@ impl ArtistsState {
             .block(Block::default())
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
-        frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
-
-        let pos = self.list_state.selected().unwrap_or(0);
-        self.scrollbar_state = ScrollbarState::new(display.len()).position(pos);
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            chunks[2],
-            &mut self.scrollbar_state,
-        );
+        frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 }
 
