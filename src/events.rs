@@ -450,6 +450,18 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
     }
 
     let queue_len = app.cached_queue_tracks.len();
+    let visible_len = if app.queue_filter.is_empty() {
+        queue_len
+    } else {
+        let fl = app.queue_filter.to_lowercase();
+        app.cached_queue_tracks
+            .iter()
+            .filter(|t| {
+                t.title.to_lowercase().contains(&fl)
+                    || t.artist_names.iter().any(|a| a.to_lowercase().contains(&fl))
+            })
+            .count()
+    };
     match key.code {
         KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
             app.focused_panel = FocusedPanel::Content;
@@ -458,11 +470,11 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
             app.queue_filter_active = true;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            if queue_len > 0 {
+            if visible_len > 0 {
                 let next = app
                     .right_panel_queue_state
                     .selected()
-                    .map(|i| (i + 1).min(queue_len - 1))
+                    .map(|i| (i + 1).min(visible_len - 1))
                     .unwrap_or(0);
                 app.right_panel_queue_state.select(Some(next));
             }
@@ -473,23 +485,40 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
                 .selected()
                 .map(|i| i.saturating_sub(1))
                 .unwrap_or(0);
-            if queue_len > 0 {
+            if visible_len > 0 {
                 app.right_panel_queue_state.select(Some(prev));
             }
         }
         KeyCode::Char('g') => {
-            if queue_len > 0 {
+            if visible_len > 0 {
                 app.right_panel_queue_state.select(Some(0));
             }
         }
         KeyCode::Char('G') => {
-            if queue_len > 0 {
-                app.right_panel_queue_state.select(Some(queue_len - 1));
+            if visible_len > 0 {
+                app.right_panel_queue_state.select(Some(visible_len - 1));
             }
         }
         KeyCode::Enter => {
-            if let Some(idx) = app.right_panel_queue_state.selected() {
-                let _ = app.player.jump_to_index(idx);
+            if let Some(filtered_idx) = app.right_panel_queue_state.selected() {
+                let orig_idx = if app.queue_filter.is_empty() {
+                    filtered_idx
+                } else {
+                    let fl = app.queue_filter.to_lowercase();
+                    app.cached_queue_tracks
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| {
+                            t.title.to_lowercase().contains(&fl)
+                                || t.artist_names
+                                    .iter()
+                                    .any(|a| a.to_lowercase().contains(&fl))
+                        })
+                        .nth(filtered_idx)
+                        .map(|(i, _)| i)
+                        .unwrap_or(filtered_idx)
+                };
+                let _ = app.player.jump_to_index(orig_idx);
                 if app.player_cache.state != PlaybackState::Playing {
                     let _ = app.player.resume();
                 }

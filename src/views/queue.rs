@@ -1,7 +1,7 @@
 use crate::utils::{format_duration, truncate};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, List, ListItem, ListState, Paragraph},
@@ -27,9 +27,13 @@ pub fn render_filter_bar(frame: &mut Frame, area: Rect, filter: &str, active: bo
     } else {
         Style::default()
     };
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 0,
+    });
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(text, style))).style(bg),
-        area,
+        inner,
     );
 }
 
