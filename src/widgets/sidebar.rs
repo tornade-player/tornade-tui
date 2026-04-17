@@ -35,6 +35,7 @@ pub fn render(
     // ── "Library" header ──────────────────────────────────────────────────────
     items.push(blank());
     items.push(header_item("Library"));
+    items.push(blank());
 
     for entry in &LIBRARY_ENTRIES {
         let is_active = *entry == active_entry
