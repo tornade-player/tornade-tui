@@ -1,14 +1,27 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Clear, List, ListItem},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem},
 };
 
 pub fn render(frame: &mut Frame) {
     let area = centered_rect(80, 85, frame.area());
     frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Help ")
+        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    frame.render_widget(block, area);
+
+    let inner = area.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
 
     let sections: &[(&str, &[(&str, &str)])] = &[
         (
@@ -138,7 +151,7 @@ pub fn render(frame: &mut Frame) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+        .split(inner);
 
     let half = sections.len() / 2 + sections.len() % 2;
     for (col_idx, section_slice) in [&sections[..half], &sections[half..]].iter().enumerate() {
