@@ -593,14 +593,22 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Cursor movement ──
         KeyCode::Char('j') | KeyCode::Down => move_down(app),
         KeyCode::Char('k') | KeyCode::Up => move_up(app),
-        KeyCode::Char('h') | KeyCode::Left if matches!(app.nav.current(), View::Albums(_)) => {
-            if let View::Albums(s) = app.nav.current_mut() {
-                s.move_left();
+        KeyCode::Char('h') | KeyCode::Left
+            if matches!(app.nav.current(), View::Albums(_) | View::Artists(_)) =>
+        {
+            match app.nav.current_mut() {
+                View::Albums(s) => s.move_left(),
+                View::Artists(s) => s.move_left(),
+                _ => {}
             }
         }
-        KeyCode::Char('l') | KeyCode::Right if matches!(app.nav.current(), View::Albums(_)) => {
-            if let View::Albums(s) = app.nav.current_mut() {
-                s.move_right();
+        KeyCode::Char('l') | KeyCode::Right
+            if matches!(app.nav.current(), View::Albums(_) | View::Artists(_)) =>
+        {
+            match app.nav.current_mut() {
+                View::Albums(s) => s.move_right(),
+                View::Artists(s) => s.move_right(),
+                _ => {}
             }
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => page_down(app),
