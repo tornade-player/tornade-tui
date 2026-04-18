@@ -11,6 +11,7 @@ use ratatui::{
     },
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
+use std::path::PathBuf;
 use tornade_core::{models::Genre, services::LibraryService};
 
 /// Height in terminal rows for each genre row (image height).
@@ -24,36 +25,29 @@ pub struct GenresState {
     pub filter: String,
     pub filter_active: bool,
     pub list_state: ListState,
-    /// Pre-built mosaic image protocol per genre, indexed parallel to `genres`.
-    image_states: Vec<Option<StatefulProtocol>>,
+    /// Artwork paths (up to 4) per genre, indexed parallel to `genres`.
+    artwork_paths: Vec<Vec<PathBuf>>,
+    /// Lazily loaded mosaic protocols indexed parallel to `genres`.
+    /// `None` = not yet loaded; `Some(None)` = no mosaic available.
+    image_states: Vec<Option<Option<StatefulProtocol>>>,
     scrollbar_state: ScrollbarState,
 }
 
 impl GenresState {
-    pub fn load(&mut self, library: &LibraryService, picker: &mut Picker) {
+    pub fn load(&mut self, library: &LibraryService) {
         self.genres = library.list_genres().unwrap_or_default();
         if self.list_state.selected().is_none() && !self.genres.is_empty() {
             self.list_state.select(Some(0));
         }
 
-        // Build a 2x2 mosaic for each genre
-        self.image_states = self
+        // Only collect paths - no I/O, no image decoding.
+        let n = self.genres.len();
+        self.artwork_paths = self
             .genres
             .iter()
-            .map(|(g, _, _)| {
-                let paths = library.get_genre_artwork_paths(g.id, 4).unwrap_or_default();
-                if paths.is_empty() {
-                    return None;
-                }
-                let images: Vec<DynamicImage> =
-                    paths.iter().filter_map(|p| image::open(p).ok()).collect();
-                if images.is_empty() {
-                    return None;
-                }
-                let mosaic = build_mosaic(&images, 128);
-                Some(picker.new_resize_protocol(DynamicImage::ImageRgba8(mosaic)))
-            })
+            .map(|(g, _, _)| library.get_genre_artwork_paths(g.id, 4).unwrap_or_default())
             .collect();
+        self.image_states = (0..n).map(|_| None).collect();
     }
 
     pub fn filtered_genres(&self) -> Vec<&(Genre, u32, u32)> {
@@ -107,7 +101,7 @@ impl GenresState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) {
         let chunks = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
@@ -120,18 +114,17 @@ impl GenresState {
         let filtered_len = filtered.len();
         let selected = self.list_state.selected().unwrap_or(0);
 
-        let has_images = self.image_states.iter().any(|s| s.is_some());
+        let has_photos = self.artwork_paths.iter().any(|p| !p.is_empty());
         let has_filter = !self.filter.is_empty();
 
-        if has_images && !has_filter && IMG_WIDTH + 2 < area.width {
-            // Build filtered indices into self.genres for image lookup
+        if has_photos && !has_filter && IMG_WIDTH + 2 < area.width {
             let orig_indices: Vec<usize> = filtered
                 .iter()
                 .filter_map(|fg| self.genres.iter().position(|(g, _, _)| g.id == fg.0.id))
                 .collect();
             let names: Vec<String> = filtered.iter().map(|(g, _, _)| g.name.clone()).collect();
             drop(filtered);
-            self.render_with_images(frame, chunks[2], &names, &orig_indices, selected, focused);
+            self.render_with_images(frame, chunks[2], &names, &orig_indices, selected, focused, picker);
         } else {
             let items: Vec<ListItem> = filtered
                 .iter()
@@ -184,6 +177,7 @@ impl GenresState {
         orig_indices: &[usize],
         selected: usize,
         focused: bool,
+        picker: &mut Picker,
     ) {
         if area.height == 0 || names.is_empty() {
             return;
@@ -193,9 +187,33 @@ impl GenresState {
         let scroll_offset = selected.saturating_sub(rows_visible.saturating_sub(1));
         let end = (scroll_offset + rows_visible + 1).min(names.len());
 
+        // Lazy-load mosaics for the visible window only.
+        for rel_idx in scroll_offset..end {
+            let orig_idx = orig_indices.get(rel_idx).copied().unwrap_or(rel_idx);
+            if orig_idx < self.image_states.len() && self.image_states[orig_idx].is_none() {
+                let proto = self.artwork_paths.get(orig_idx)
+                    .filter(|paths| !paths.is_empty())
+                    .map(|paths| {
+                        let images: Vec<DynamicImage> =
+                            paths.iter().filter_map(|p| image::open(p).ok()).collect();
+                        if images.is_empty() {
+                            None
+                        } else {
+                            let mosaic = build_mosaic(&images, 128);
+                            Some(picker.new_resize_protocol(DynamicImage::ImageRgba8(mosaic)))
+                        }
+                    })
+                    .flatten();
+                self.image_states[orig_idx] = Some(proto);
+            }
+        }
+
         let mut y = area.y;
         for rel_idx in scroll_offset..end {
             let is_selected = rel_idx == selected;
+            if y >= area.y + area.height {
+                break;
+            }
             let row_area = Rect {
                 x: area.x,
                 y,
@@ -216,9 +234,8 @@ impl GenresState {
             let cols = Layout::horizontal([Constraint::Length(IMG_WIDTH), Constraint::Min(0)])
                 .split(row_area);
 
-            // Mosaic image on the left
             let orig_idx = orig_indices.get(rel_idx).copied().unwrap_or(rel_idx);
-            if let Some(Some(proto)) = self.image_states.get_mut(orig_idx) {
+            if let Some(Some(Some(proto))) = self.image_states.get_mut(orig_idx) {
                 frame.render_stateful_widget(StatefulImage::new(), cols[0], proto);
             } else {
                 frame.render_widget(
@@ -230,7 +247,6 @@ impl GenresState {
                 );
             }
 
-            // Genre name on the right, vertically centered
             let name_w = (cols[1].width as usize).saturating_sub(2);
             let name_style = if is_selected && focused {
                 Style::default()

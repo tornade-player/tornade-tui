@@ -126,11 +126,11 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
         }
         View::Albums(s) => s.render(frame, area, focused, &mut app.picker),
         View::Artists(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &mut app.picker);
             false
         }
         View::Genres(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &mut app.picker);
             false
         }
         View::Playlists(s) => {

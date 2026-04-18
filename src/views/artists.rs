@@ -10,6 +10,7 @@ use ratatui::{
     },
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
+use std::path::PathBuf;
 use tornade_core::models::Artist;
 use tornade_core::services::LibraryService;
 
@@ -25,28 +26,24 @@ pub struct ArtistsState {
     pub list_state: ListState,
     pub filter: String,
     pub filter_active: bool,
-    /// Pre-loaded image protocols indexed parallel to `artists`.
-    image_states: Vec<Option<StatefulProtocol>>,
+    /// Photo paths indexed parallel to `artists` (populated by load, never changes).
+    photo_paths: Vec<Option<PathBuf>>,
+    /// Lazily loaded image protocols indexed parallel to `artists`.
+    /// `None` = not yet loaded; `Some(None)` = no image available.
+    image_states: Vec<Option<Option<StatefulProtocol>>>,
     scrollbar_state: ScrollbarState,
 }
 
 impl ArtistsState {
-    pub fn load(&mut self, library: &LibraryService, picker: &mut Picker) {
+    pub fn load(&mut self, library: &LibraryService) {
         self.artists = library.list_artists().unwrap_or_default();
         if self.list_state.selected().is_none() && !self.artists.is_empty() {
             self.list_state.select(Some(0));
         }
-        // Load photo for each artist (None if no photo_path or load fails).
-        self.image_states = self
-            .artists
-            .iter()
-            .map(|a| {
-                a.photo_path
-                    .as_ref()
-                    .and_then(|p| image::open(p).ok())
-                    .map(|img| picker.new_resize_protocol(img))
-            })
-            .collect();
+        // Only collect paths - no I/O, no image decoding.
+        let n = self.artists.len();
+        self.photo_paths = self.artists.iter().map(|a| a.photo_path.clone()).collect();
+        self.image_states = (0..n).map(|_| None).collect();
     }
 
     pub fn display_artists(&self) -> &[Artist] {
@@ -111,7 +108,7 @@ impl ArtistsState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) {
         let chunks = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
@@ -123,12 +120,11 @@ impl ArtistsState {
         let display: Vec<Artist> = self.display_artists().to_vec();
         let display_len = display.len();
 
-        // Check if any artist in the visible range has a photo
         let selected = self.list_state.selected().unwrap_or(0);
-        let has_images = display.iter().any(|a| a.photo_path.is_some());
+        let has_photos = self.photo_paths.iter().any(|p| p.is_some());
 
-        if has_images && IMG_WIDTH + 2 < area.width {
-            self.render_with_images(frame, chunks[2], &display, selected, focused);
+        if has_photos && IMG_WIDTH + 2 < area.width {
+            self.render_with_images(frame, chunks[2], &display, selected, focused, picker);
         } else {
             self.render_text_only(frame, chunks[2], &display, focused);
         }
@@ -143,6 +139,7 @@ impl ArtistsState {
     }
 
     /// Render with photo thumbnails: each artist occupies ROW_HEIGHT rows.
+    /// Images are loaded lazily on first render for each visible row.
     fn render_with_images(
         &mut self,
         frame: &mut Frame,
@@ -150,21 +147,41 @@ impl ArtistsState {
         display: &[Artist],
         selected: usize,
         focused: bool,
+        picker: &mut Picker,
     ) {
         if area.height == 0 {
             return;
         }
 
-        // Determine visible range based on scroll offset
         let rows_visible = (area.height / ROW_HEIGHT) as usize;
         let scroll_offset = selected.saturating_sub(rows_visible.saturating_sub(1));
         let end = (scroll_offset + rows_visible + 1).min(display.len());
         let visible = &display[scroll_offset..end];
 
+        // Lazy-load images for the visible window only.
+        for (rel_idx, artist) in visible.iter().enumerate() {
+            let abs_idx = scroll_offset + rel_idx;
+            let orig_idx = self
+                .artists
+                .iter()
+                .position(|a| a.id == artist.id)
+                .unwrap_or(abs_idx);
+            if orig_idx < self.image_states.len() && self.image_states[orig_idx].is_none() {
+                let proto = self.photo_paths.get(orig_idx)
+                    .and_then(|p| p.as_ref())
+                    .and_then(|p| image::open(p).ok())
+                    .map(|img| picker.new_resize_protocol(img));
+                self.image_states[orig_idx] = Some(proto);
+            }
+        }
+
         let mut y = area.y;
         for (rel_idx, artist) in visible.iter().enumerate() {
             let abs_idx = scroll_offset + rel_idx;
             let is_selected = abs_idx == selected;
+            if y >= area.y + area.height {
+                break;
+            }
             let row_area = Rect {
                 x: area.x,
                 y,
@@ -175,7 +192,6 @@ impl ArtistsState {
                 break;
             }
 
-            // Highlight background for selected row
             if is_selected && focused {
                 frame.render_widget(
                     Block::default().style(Style::default().bg(Color::Rgb(40, 42, 54))),
@@ -186,27 +202,23 @@ impl ArtistsState {
             let cols = Layout::horizontal([Constraint::Length(IMG_WIDTH), Constraint::Min(0)])
                 .split(row_area);
 
-            // Image on the left
-            let img_area = cols[0];
             let orig_idx = self
                 .artists
                 .iter()
                 .position(|a| a.id == artist.id)
                 .unwrap_or(abs_idx);
-            if let Some(Some(proto)) = self.image_states.get_mut(orig_idx) {
-                frame.render_stateful_widget(StatefulImage::new(), img_area, proto);
+            if let Some(Some(Some(proto))) = self.image_states.get_mut(orig_idx) {
+                frame.render_stateful_widget(StatefulImage::new(), cols[0], proto);
             } else {
-                // Placeholder
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(
                         " ♪ ",
                         Style::default().fg(Color::DarkGray),
                     ))),
-                    img_area,
+                    cols[0],
                 );
             }
 
-            // Name on the right, vertically centered
             let name_w = (cols[1].width as usize).saturating_sub(2);
             let name_style = if is_selected && focused {
                 Style::default()
