@@ -1,4 +1,6 @@
 pub mod album_detail;
+#[cfg(test)]
+mod render_tests;
 pub mod albums;
 pub mod artist_detail;
 pub mod artists;
