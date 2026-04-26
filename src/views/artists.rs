@@ -1,11 +1,13 @@
 use crate::utils::truncate;
-use image::Rgba;
+use crate::views::{ACTIVE_IMAGE_THREADS, MAX_IMAGE_THREADS};
+use std::path::Path;
+use std::sync::atomic::Ordering;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
@@ -25,7 +27,8 @@ const GAP_H: u16 = 2;
 // Left/right padding inside the grid area
 const GRID_PAD: u16 = 1;
 
-type PendingQueue = Arc<Mutex<Vec<(i64, image::DynamicImage)>>>;
+/// None signals a failed load so the id is removed from loading_ids without caching.
+type PendingQueue = Arc<Mutex<Vec<(i64, Option<image::DynamicImage>)>>>;
 
 pub struct ArtistsState {
     pub artists: Vec<Artist>,
@@ -43,6 +46,7 @@ pub struct ArtistsState {
     scrollbar_state: ScrollbarState,
     pending_decoded: PendingQueue,
     loading_ids: HashSet<i64>,
+    failed_ids: HashSet<i64>,
 }
 
 impl Default for ArtistsState {
@@ -63,28 +67,11 @@ impl Default for ArtistsState {
             scrollbar_state: ScrollbarState::default(),
             pending_decoded: Arc::new(Mutex::new(Vec::new())),
             loading_ids: HashSet::new(),
+            failed_ids: HashSet::new(),
         }
     }
 }
 
-/// Zero alpha outside the inscribed circle (for circular photo appearance).
-fn apply_circle_mask(img: image::DynamicImage) -> image::DynamicImage {
-    let (w, h) = (img.width(), img.height());
-    let mut rgba = img.into_rgba8();
-    let cx = w as f32 / 2.0;
-    let cy = h as f32 / 2.0;
-    let r = cx.min(cy);
-    for y in 0..h {
-        for x in 0..w {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            if dx * dx + dy * dy > r * r {
-                rgba.put_pixel(x, y, Rgba([0, 0, 0, 0]));
-            }
-        }
-    }
-    image::DynamicImage::ImageRgba8(rgba)
-}
 
 impl ArtistsState {
     pub fn load(&mut self, library: &LibraryService) {
@@ -149,6 +136,7 @@ impl ArtistsState {
         area: Rect,
         focused: bool,
         picker: &mut Picker,
+        tui_dir: &Path,
     ) -> bool {
         self.sync_list_state();
 
@@ -208,36 +196,53 @@ impl ArtistsState {
 
         // 1. Drain images decoded by background threads → encode into StatefulProtocol
         if let Ok(mut pending) = self.pending_decoded.try_lock() {
-            for (id, img) in pending.drain(..) {
+            for (id, result) in pending.drain(..) {
                 self.loading_ids.remove(&id);
-                self.image_cache.insert(id, picker.new_resize_protocol(img));
+                if let Some(img) = result {
+                    self.image_cache.insert(id, picker.new_resize_protocol(img));
+                } else {
+                    // Permanent failure: mark so we never retry this id again.
+                    self.failed_ids.insert(id);
+                }
             }
         }
 
-        // 2. Spawn background threads for visible artists not yet in cache or loading
+        // 2. Spawn background threads for visible artists not yet in cache or loading.
+        //    Use a global atomic cap so threads from OLD states (after navigation) are
+        //    counted and prevent unbounded accumulation.
         let (fw, fh) = (font.0, font.1);
         let target_px = ((self.img_cols as u32) * (fw as u32)).max(1);
         for (_, id, _, photo_path) in &visible {
-            if self.image_cache.contains_key(id) || self.loading_ids.contains(id) {
+            if ACTIVE_IMAGE_THREADS.load(Ordering::Relaxed) >= MAX_IMAGE_THREADS {
+                break;
+            }
+            if self.image_cache.contains_key(id)
+                || self.loading_ids.contains(id)
+                || self.failed_ids.contains(id)
+            {
                 continue;
             }
-            if let Some(path) = photo_path.clone() {
+            if let Some(orig) = photo_path {
+                let path = crate::tui_artwork::resolve_artwork_path(orig, tui_dir);
                 self.loading_ids.insert(*id);
+                ACTIVE_IMAGE_THREADS.fetch_add(1, Ordering::Relaxed);
                 let id = *id;
                 let pending = Arc::clone(&self.pending_decoded);
                 let target_h = ((IMG_H as u32) * (fh as u32)).max(1);
                 std::thread::spawn(move || {
-                    if let Ok(img) = image::open(&path) {
-                        let img = img.resize_to_fill(
+                    let result = image::open(&path).ok().map(|img| {
+                        let resized = img.resize_to_fill(
                             target_px,
                             target_h,
                             image::imageops::FilterType::Triangle,
                         );
-                        let img = apply_circle_mask(img);
-                        if let Ok(mut guard) = pending.lock() {
-                            guard.push((id, img));
-                        }
+                        image::DynamicImage::ImageRgba8(resized.to_rgba8())
+                    });
+                    // Always push (even None on failure) so the id is cleared from loading_ids.
+                    if let Ok(mut guard) = pending.lock() {
+                        guard.push((id, result));
                     }
+                    ACTIVE_IMAGE_THREADS.fetch_sub(1, Ordering::Relaxed);
                 });
             }
         }
@@ -284,26 +289,6 @@ impl ArtistsState {
         );
 
         has_pending
-    }
-
-    /// Fallback text list (used when filter is active and grid would be confusing).
-    pub fn render_text_list(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
-        let display = self.display_artists();
-        let items: Vec<ListItem> = display
-            .iter()
-            .map(|a| ListItem::new(Line::from(Span::raw(truncate(&a.name, 60)))))
-            .collect();
-        let (hl_style, hl_sym) = if focused {
-            (Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD), "> ")
-        } else {
-            (Style::default().fg(Color::DarkGray), "  ")
-        };
-        let list = List::new(items)
-            .block(Block::default())
-            .highlight_style(hl_style)
-            .highlight_symbol(hl_sym);
-        self.list_state.select(Some(self.selected));
-        frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 }
 

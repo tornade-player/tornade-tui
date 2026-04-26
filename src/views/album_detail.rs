@@ -1,4 +1,5 @@
 use crate::utils::{format_duration, format_rating, truncate};
+use std::path::Path;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Margin, Rect},
@@ -23,7 +24,12 @@ pub struct AlbumDetailState {
 }
 
 impl AlbumDetailState {
-    pub fn new(album: Album, library: &LibraryService, picker: &mut Picker) -> Self {
+    pub fn new(
+        album: Album,
+        library: &LibraryService,
+        picker: &mut Picker,
+        tui_album_dir: &Path,
+    ) -> Self {
         let tracks = library.get_album_tracks(album.id).unwrap_or_default();
         let mut list_state = ListState::default();
         if !tracks.is_empty() {
@@ -33,8 +39,10 @@ impl AlbumDetailState {
         let image_state = album
             .online_artwork_path
             .as_ref()
-            .or(album.artwork_path.as_ref())
-            .and_then(|p| image::open(p).ok())
+            .map(|p| crate::tui_artwork::resolve_artwork_path(p, tui_album_dir))
+            .or_else(|| album.artwork_path.as_ref().cloned())
+            .and_then(|p| image::open(&p).ok())
+            .map(|img| image::DynamicImage::ImageRgba8(img.to_rgba8()))
             .map(|img| picker.new_resize_protocol(img));
 
         let artist_albums = library

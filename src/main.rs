@@ -20,6 +20,7 @@ mod commands;
 mod events;
 mod navigation;
 mod player;
+mod tui_artwork;
 mod ui;
 mod utils;
 mod views;
@@ -42,13 +43,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let search_svc = SearchService::new(pool.clone());
     let artwork = ArtworkService::new(pool.clone(), paths.clone());
 
-    // Detect terminal image protocol before entering raw mode
-    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-
-    // Build application state
-    let mut app = AppState::new(
-        player, library, playlists, search_svc, artwork, paths, picker,
-    );
+    // Detect terminal image protocol before entering raw mode.
+    let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    // Ghostty: ratatui_image v10 detects Sixel but rendering fails.
+    // Kitty uses Unicode placeholders (U=1) which Ghostty doesn't support either.
+    // Halfblocks is the only working protocol; font_size from query is preserved.
+    if std::env::var("TERM_PROGRAM").is_ok_and(|v| v.eq_ignore_ascii_case("ghostty")) {
+        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Halfblocks);
+    }
 
     // Setup terminal
     enable_raw_mode()?;
@@ -56,6 +58,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
+    // Migrate existing artwork to TUI thumbnails in background (non-blocking)
+    {
+        let paths_clone = paths.clone();
+        std::thread::spawn(move || {
+            tui_artwork::process_all_pending(&paths_clone);
+        });
+    }
+
+    // Build application state
+    let mut app = AppState::new(
+        player, library, playlists, search_svc, artwork, paths, picker,
+    );
 
     // Run event loop
     let result = run_loop(&mut terminal, &mut app);
@@ -127,6 +142,10 @@ fn run_loop(
                 }
                 _ => {}
             }
+        } else if app.has_pending_images {
+            // Poll timed out while background image loads are in progress: redraw to pick up
+            // any newly decoded images that background threads may have pushed to the queue.
+            needs_redraw = true;
         }
 
         if last_tick.elapsed() >= tick_rate {

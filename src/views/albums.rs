@@ -1,5 +1,7 @@
 use crate::utils::truncate;
-use image::Rgba;
+use crate::views::{ACTIVE_IMAGE_THREADS, MAX_IMAGE_THREADS};
+use std::path::Path;
+use std::sync::atomic::Ordering;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -23,11 +25,9 @@ const GAP_W: u16 = 3;
 const GAP_H: u16 = 2;
 // Left/right padding inside the grid area
 const GRID_PAD: u16 = 1;
-// Corner radius as fraction of the shorter image dimension
-const CORNER_RADIUS_FRAC: f32 = 0.12;
-
 /// Images decoded in background threads, waiting to be encoded by the picker on the main thread.
-type PendingQueue = Arc<Mutex<Vec<(i64, image::DynamicImage)>>>;
+/// None signals a failed load so the id is removed from loading_ids without caching.
+type PendingQueue = Arc<Mutex<Vec<(i64, Option<image::DynamicImage>)>>>;
 
 pub struct AlbumsState {
     pub albums: Vec<Album>,
@@ -47,6 +47,7 @@ pub struct AlbumsState {
     // Background loading
     pending_decoded: PendingQueue,
     loading_ids: HashSet<i64>,
+    failed_ids: HashSet<i64>,
 }
 
 impl Default for AlbumsState {
@@ -67,35 +68,11 @@ impl Default for AlbumsState {
             scrollbar_state: ScrollbarState::default(),
             pending_decoded: Arc::new(Mutex::new(Vec::new())),
             loading_ids: HashSet::new(),
+            failed_ids: HashSet::new(),
         }
     }
 }
 
-/// Apply rounded corners by zeroing alpha in corner regions.
-/// Called in background threads - operates on an already-resized image.
-fn apply_rounded_corners(img: image::DynamicImage) -> image::DynamicImage {
-    let (w, h) = (img.width(), img.height());
-    let mut rgba = img.into_rgba8();
-    let r = (w.min(h) as f32 * CORNER_RADIUS_FRAC).max(1.0);
-    let fw = w as f32;
-    let fh = h as f32;
-    for y in 0..h {
-        for x in 0..w {
-            let fx = x as f32;
-            let fy = y as f32;
-            let in_corner = (fx < r && fy < r && (fx - r).hypot(fy - r) > r)
-                || (fx > fw - r - 1.0 && fy < r && (fx - (fw - r - 1.0)).hypot(fy - r) > r)
-                || (fx < r && fy > fh - r - 1.0 && (fx - r).hypot(fy - (fh - r - 1.0)) > r)
-                || (fx > fw - r - 1.0
-                    && fy > fh - r - 1.0
-                    && (fx - (fw - r - 1.0)).hypot(fy - (fh - r - 1.0)) > r);
-            if in_corner {
-                rgba.put_pixel(x, y, Rgba([0, 0, 0, 0]));
-            }
-        }
-    }
-    image::DynamicImage::ImageRgba8(rgba)
-}
 
 impl AlbumsState {
     pub fn load(&mut self, library: &LibraryService) {
@@ -183,6 +160,7 @@ impl AlbumsState {
         area: Rect,
         focused: bool,
         picker: &mut Picker,
+        tui_dir: &Path,
     ) -> bool {
         let chunks = Layout::vertical([
             Constraint::Length(1),
@@ -268,38 +246,57 @@ impl AlbumsState {
         //    (picker.new_resize_protocol must run on the main thread)
         {
             if let Ok(mut pending) = self.pending_decoded.try_lock() {
-                for (id, img) in pending.drain(..) {
+                for (id, result) in pending.drain(..) {
                     self.loading_ids.remove(&id);
-                    self.image_cache.insert(id, picker.new_resize_protocol(img));
+                    if let Some(img) = result {
+                        self.image_cache.insert(id, picker.new_resize_protocol(img));
+                    } else {
+                        // Permanent failure: mark so we never retry this id again.
+                        self.failed_ids.insert(id);
+                    }
                 }
             }
         }
 
-        // 2. Spawn background threads for visible images not yet in cache or loading
+        // 2. Spawn background threads for visible images not yet in cache or loading.
+        //    Use the global atomic cap so threads from OLD states after navigation are counted.
         let (fw, fh) = (font.0, font.1);
         let target_px_w = (self.img_cols as u32) * (fw as u32);
         let target_px_h = (IMG_H as u32) * (fh as u32);
+
         for (_, id, _, _, _, online, local) in &visible {
-            if self.image_cache.contains_key(id) || self.loading_ids.contains(id) {
+            if ACTIVE_IMAGE_THREADS.load(Ordering::Relaxed) >= MAX_IMAGE_THREADS {
+                break;
+            }
+            if self.image_cache.contains_key(id)
+                || self.loading_ids.contains(id)
+                || self.failed_ids.contains(id)
+            {
                 continue;
             }
-            let path = online.as_ref().or(local.as_ref()).cloned();
+            let path = online
+                .as_ref()
+                .map(|p| crate::tui_artwork::resolve_artwork_path(p, tui_dir))
+                .or_else(|| local.as_ref().cloned());
             if let Some(path) = path {
                 self.loading_ids.insert(*id);
+                ACTIVE_IMAGE_THREADS.fetch_add(1, Ordering::Relaxed);
                 let id = *id;
                 let pending = Arc::clone(&self.pending_decoded);
                 std::thread::spawn(move || {
-                    if let Ok(img) = image::open(&path) {
-                        let img = img.resize_to_fill(
+                    let result = image::open(&path).ok().map(|img| {
+                        let resized = img.resize_to_fill(
                             target_px_w.max(1),
                             target_px_h.max(1),
                             image::imageops::FilterType::Triangle,
                         );
-                        let img = apply_rounded_corners(img);
-                        if let Ok(mut guard) = pending.lock() {
-                            guard.push((id, img));
-                        }
+                        image::DynamicImage::ImageRgba8(resized.to_rgba8())
+                    });
+                    // Always push (even None on failure) so the id is cleared from loading_ids.
+                    if let Ok(mut guard) = pending.lock() {
+                        guard.push((id, result));
                     }
+                    ACTIVE_IMAGE_THREADS.fetch_sub(1, Ordering::Relaxed);
                 });
             }
         }

@@ -1,5 +1,5 @@
 use crate::utils::truncate;
-use image::{DynamicImage, Rgba};
+use image::DynamicImage;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -12,6 +12,7 @@ use ratatui::{
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use tornade_core::{
     models::{Album, Artist},
     services::LibraryService,
@@ -22,33 +23,17 @@ pub struct ArtistDetailState {
     pub albums: Vec<Album>,
     pub list_state: ListState,
     image_state: Option<StatefulProtocol>,
+    pending_image: Arc<Mutex<Option<DynamicImage>>>,
+    image_loading: bool,
     scrollbar_state: ScrollbarState,
 }
 
-/// Apply a circular mask to an image (pixels outside the circle become transparent).
-fn apply_circle_mask(img: DynamicImage) -> DynamicImage {
-    let (w, h) = (img.width(), img.height());
-    let mut rgba = img.into_rgba8();
-    let cx = w as f32 / 2.0;
-    let cy = h as f32 / 2.0;
-    let r = cx.min(cy);
-    for y in 0..h {
-        for x in 0..w {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            if (dx * dx + dy * dy).sqrt() > r {
-                rgba.put_pixel(x, y, Rgba([0, 0, 0, 0]));
-            }
-        }
-    }
-    DynamicImage::ImageRgba8(rgba)
-}
 
 impl ArtistDetailState {
     pub fn new(
         artist: Artist,
         library: &LibraryService,
-        picker: &mut Picker,
+        _picker: &mut Picker,
         photo_dir: &Path,
     ) -> Self {
         let albums = library.get_artist_albums(artist.id).unwrap_or_default();
@@ -57,21 +42,28 @@ impl ArtistDetailState {
             list_state.select(Some(0));
         }
 
+        let pending_image: Arc<Mutex<Option<DynamicImage>>> = Arc::new(Mutex::new(None));
         let photo_path = photo_dir.join(format!("{}.jpg", artist.id));
-        let image_state = if photo_path.exists() {
-            image::open(&photo_path)
-                .ok()
-                .map(apply_circle_mask)
-                .map(|img| picker.new_resize_protocol(img))
-        } else {
-            None
-        };
+        let image_loading = photo_path.exists();
+
+        if image_loading {
+            let pending = Arc::clone(&pending_image);
+            std::thread::spawn(move || {
+                if let Ok(img) = image::open(&photo_path) {
+                    if let Ok(mut guard) = pending.lock() {
+                        *guard = Some(img);
+                    }
+                }
+            });
+        }
 
         Self {
             artist,
             albums,
             list_state,
-            image_state,
+            image_state: None,
+            pending_image,
+            image_loading,
             scrollbar_state: ScrollbarState::default(),
         }
     }
@@ -111,7 +103,20 @@ impl ArtistDetailState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) -> bool {
+        // Drain decoded image from background thread
+        if self.image_loading && self.image_state.is_none() {
+            if let Ok(mut guard) = self.pending_image.try_lock() {
+                if let Some(img) = guard.take() {
+                    let rgba = image::DynamicImage::ImageRgba8(img.to_rgba8());
+                    self.image_state = Some(picker.new_resize_protocol(rgba));
+                    self.image_loading = false;
+                }
+            }
+        }
+
+        let has_pending = self.image_loading;
+
         let header_height = if self.image_state.is_some() { 10 } else { 4 };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -155,6 +160,8 @@ impl ArtistDetailState {
             chunks[1],
             &mut self.scrollbar_state,
         );
+
+        has_pending
     }
 
     fn render_header(&mut self, frame: &mut Frame, area: Rect) {

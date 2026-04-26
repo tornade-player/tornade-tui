@@ -119,17 +119,16 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
 /// Returns true when background image loads are still in progress (caller should redraw soon).
 fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
+    let tui_album_dir = crate::tui_artwork::tui_album_dir(&app.paths);
+    let tui_artist_dir = crate::tui_artwork::tui_artist_dir(&app.paths);
     match app.nav.current_mut() {
         View::Library(s) => {
             s.render(frame, area, focused);
             false
         }
-        View::Albums(s) => s.render(frame, area, focused, &mut app.picker),
-        View::Artists(s) => s.render(frame, area, focused, &mut app.picker),
-        View::Genres(s) => {
-            s.render(frame, area, focused, &mut app.picker);
-            false
-        }
+        View::Albums(s) => s.render(frame, area, focused, &mut app.picker, &tui_album_dir),
+        View::Artists(s) => s.render(frame, area, focused, &mut app.picker, &tui_artist_dir),
+        View::Genres(s) => s.render(frame, area, focused, &mut app.picker, &tui_album_dir),
         View::Playlists(s) => {
             s.render(frame, area, focused);
             false
@@ -138,10 +137,7 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
             s.render(frame, area, focused);
             false
         }
-        View::ArtistDetail(s) => {
-            s.render(frame, area, focused);
-            false
-        }
+        View::ArtistDetail(s) => s.render(frame, area, focused, &mut app.picker),
         View::GenreDetail(s) => {
             s.render(frame, area, focused);
             false

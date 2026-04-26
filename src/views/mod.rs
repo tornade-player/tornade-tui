@@ -1,3 +1,12 @@
+use std::sync::atomic::AtomicUsize;
+
+/// Global cap on concurrent background image-decode threads across all views.
+/// Prevents thread accumulation when the user navigates between image views rapidly
+/// (each new view state has empty loading_ids but old threads from the previous
+/// state are still running, so without a global cap they compound).
+pub static ACTIVE_IMAGE_THREADS: AtomicUsize = AtomicUsize::new(0);
+pub const MAX_IMAGE_THREADS: usize = 4;
+
 pub mod album_detail;
 #[cfg(test)]
 mod render_tests;

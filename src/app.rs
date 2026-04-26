@@ -236,13 +236,15 @@ impl AppState {
             && let Ok(Some(album)) = self.library.get_album(album_id)
         {
             self.current_album_name = Some(album.title.clone());
+            let tui_dir = crate::tui_artwork::tui_album_dir(&self.paths);
             let path = album
                 .online_artwork_path
                 .as_ref()
-                .or(album.artwork_path.as_ref())
-                .cloned();
+                .map(|p| crate::tui_artwork::resolve_artwork_path(p, &tui_dir))
+                .or_else(|| album.artwork_path.as_ref().cloned());
             self.player_artwork = path
-                .and_then(|p| image::open(p).ok())
+                .and_then(|p| image::open(&p).ok())
+                .map(|img| image::DynamicImage::ImageRgba8(img.to_rgba8()))
                 .map(|img| self.picker.new_resize_protocol(img));
             return;
         }

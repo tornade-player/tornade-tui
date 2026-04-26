@@ -11,7 +11,11 @@ use ratatui::{
     },
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
-use std::path::PathBuf;
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tornade_core::{models::Genre, services::LibraryService};
 
 /// Height in terminal rows for each genre row (image height).
@@ -19,7 +23,10 @@ const ROW_HEIGHT: u16 = 4;
 /// Width reserved for the mosaic image.
 const IMG_WIDTH: u16 = 8;
 
-#[derive(Default)]
+/// Background queue: decoded mosaics waiting to be turned into protocols on the main thread.
+/// Indexed by position in `genres` (orig_idx).
+type PendingQueue = Arc<Mutex<Vec<(usize, DynamicImage)>>>;
+
 pub struct GenresState {
     pub genres: Vec<(Genre, u32, u32)>,
     pub filter: String,
@@ -30,7 +37,27 @@ pub struct GenresState {
     /// Lazily loaded mosaic protocols indexed parallel to `genres`.
     /// `None` = not yet loaded; `Some(None)` = no mosaic available.
     image_states: Vec<Option<Option<StatefulProtocol>>>,
+    /// Indices currently being loaded in background threads.
+    loading_ids: HashSet<usize>,
+    /// Queue of decoded mosaics ready to be turned into protocols on the main thread.
+    pending_decoded: PendingQueue,
     scrollbar_state: ScrollbarState,
+}
+
+impl Default for GenresState {
+    fn default() -> Self {
+        Self {
+            genres: Vec::new(),
+            filter: String::new(),
+            filter_active: false,
+            list_state: ListState::default(),
+            artwork_paths: Vec::new(),
+            image_states: Vec::new(),
+            loading_ids: HashSet::new(),
+            pending_decoded: Arc::new(Mutex::new(Vec::new())),
+            scrollbar_state: ScrollbarState::default(),
+        }
+    }
 }
 
 impl GenresState {
@@ -48,6 +75,7 @@ impl GenresState {
             .map(|(g, _, _)| library.get_genre_artwork_paths(g.id, 4).unwrap_or_default())
             .collect();
         self.image_states = (0..n).map(|_| None).collect();
+        self.loading_ids.clear();
     }
 
     pub fn filtered_genres(&self) -> Vec<&(Genre, u32, u32)> {
@@ -101,7 +129,7 @@ impl GenresState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker, tui_dir: &std::path::Path) -> bool {
         let chunks = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
@@ -117,14 +145,14 @@ impl GenresState {
         let has_photos = self.artwork_paths.iter().any(|p| !p.is_empty());
         let has_filter = !self.filter.is_empty();
 
-        if has_photos && !has_filter && IMG_WIDTH + 2 < area.width {
+        let has_pending = if has_photos && !has_filter && IMG_WIDTH + 2 < area.width {
             let orig_indices: Vec<usize> = filtered
                 .iter()
                 .filter_map(|fg| self.genres.iter().position(|(g, _, _)| g.id == fg.0.id))
                 .collect();
             let names: Vec<String> = filtered.iter().map(|(g, _, _)| g.name.clone()).collect();
             drop(filtered);
-            self.render_with_images(frame, chunks[2], &names, &orig_indices, selected, focused, picker);
+            self.render_with_images(frame, chunks[2], &names, &orig_indices, selected, focused, picker, tui_dir)
         } else {
             let items: Vec<ListItem> = filtered
                 .iter()
@@ -158,7 +186,8 @@ impl GenresState {
                 .highlight_style(hl_style)
                 .highlight_symbol(hl_sym);
             frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
-        }
+            false
+        };
 
         let pos = self.list_state.selected().unwrap_or(0);
         self.scrollbar_state = ScrollbarState::new(filtered_len).position(pos);
@@ -167,6 +196,8 @@ impl GenresState {
             chunks[2],
             &mut self.scrollbar_state,
         );
+
+        has_pending
     }
 
     fn render_with_images(
@@ -178,36 +209,74 @@ impl GenresState {
         selected: usize,
         focused: bool,
         picker: &mut Picker,
-    ) {
+        tui_dir: &std::path::Path,
+    ) -> bool {
         if area.height == 0 || names.is_empty() {
-            return;
+            return false;
+        }
+
+        // 1. Drain background-decoded mosaics and turn them into protocols (main thread only).
+        {
+            let mut pending = self.pending_decoded.lock().unwrap();
+            for (orig_idx, mosaic) in pending.drain(..) {
+                self.loading_ids.remove(&orig_idx);
+                if orig_idx < self.image_states.len() {
+                    let proto = picker.new_resize_protocol(mosaic);
+                    self.image_states[orig_idx] = Some(Some(proto));
+                }
+            }
         }
 
         let rows_visible = (area.height / ROW_HEIGHT) as usize;
         let scroll_offset = selected.saturating_sub(rows_visible.saturating_sub(1));
         let end = (scroll_offset + rows_visible + 1).min(names.len());
 
-        // Lazy-load mosaics for the visible window only.
+        // 2. Spawn background threads for visible genres not yet loaded/loading.
         for rel_idx in scroll_offset..end {
             let orig_idx = orig_indices.get(rel_idx).copied().unwrap_or(rel_idx);
-            if orig_idx < self.image_states.len() && self.image_states[orig_idx].is_none() {
-                let proto = self.artwork_paths.get(orig_idx)
-                    .filter(|paths| !paths.is_empty())
-                    .map(|paths| {
-                        let images: Vec<DynamicImage> =
-                            paths.iter().filter_map(|p| image::open(p).ok()).collect();
-                        if images.is_empty() {
-                            None
-                        } else {
-                            let mosaic = build_mosaic(&images, 128);
-                            Some(picker.new_resize_protocol(DynamicImage::ImageRgba8(mosaic)))
-                        }
-                    })
-                    .flatten();
-                self.image_states[orig_idx] = Some(proto);
+            if orig_idx >= self.image_states.len() {
+                continue;
             }
+            if self.image_states[orig_idx].is_some() || self.loading_ids.contains(&orig_idx) {
+                continue;
+            }
+            let paths: Vec<PathBuf> = match self.artwork_paths.get(orig_idx) {
+                Some(p) if !p.is_empty() => p
+                    .iter()
+                    .map(|p| crate::tui_artwork::resolve_artwork_path(p, tui_dir))
+                    .collect(),
+                _ => {
+                    // No artwork: mark as done immediately (Some(None))
+                    self.image_states[orig_idx] = Some(None);
+                    continue;
+                }
+            };
+            self.loading_ids.insert(orig_idx);
+            let queue = Arc::clone(&self.pending_decoded);
+            std::thread::spawn(move || {
+                let images: Vec<DynamicImage> =
+                    paths.iter().filter_map(|p| image::open(p).ok()).collect();
+                if images.is_empty() {
+                    // Signal "no image" by not pushing to the queue;
+                    // we mark loading_ids clean on next drain.
+                    // Push a sentinel: we can't send None so we use a 1x1 transparent image.
+                    // Instead, just push nothing and let the drain detect the id is still in
+                    // loading_ids but not in pending: we'll skip it next frame.
+                    // Actually simplest: push a dummy entry so we can clear loading_ids.
+                    // Use a tiny placeholder mosaic so the slot becomes Some(Some(..)) and
+                    // we stop retrying. The placeholder will render as a dark square.
+                    let placeholder = ImageBuffer::from_pixel(2, 2, Rgba([30u8, 30, 30, 255]));
+                    let mut q = queue.lock().unwrap();
+                    q.push((orig_idx, DynamicImage::ImageRgba8(placeholder)));
+                } else {
+                    let mosaic = build_mosaic(&images, 128);
+                    let mut q = queue.lock().unwrap();
+                    q.push((orig_idx, DynamicImage::ImageRgba8(mosaic)));
+                }
+            });
         }
 
+        // 3. Render visible rows.
         let mut y = area.y;
         for rel_idx in scroll_offset..end {
             let is_selected = rel_idx == selected;
@@ -275,6 +344,8 @@ impl GenresState {
 
             y += ROW_HEIGHT;
         }
+
+        !self.loading_ids.is_empty()
     }
 }
 

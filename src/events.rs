@@ -736,7 +736,8 @@ fn push_album_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths);
+        let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
         app.nav.push(View::AlbumDetail(state));
     }
 }
@@ -747,7 +748,12 @@ fn push_artist_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(artist) = artist {
-        let photo_dir = app.paths.artist_photo_dir();
+        let tui_dir = crate::tui_artwork::tui_artist_dir(&app.paths);
+        let photo_dir = if tui_dir.join(format!("{}.jpg", artist.id)).exists() {
+            tui_dir
+        } else {
+            app.paths.artist_photo_dir()
+        };
         let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
         app.nav.push(View::ArtistDetail(state));
     }
@@ -785,7 +791,8 @@ fn push_album_from_artist(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths);
+        let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
         app.nav.push(View::AlbumDetail(state));
     }
 }
@@ -804,7 +811,8 @@ fn handle_search_enter(app: &mut AppState) {
         SearchSection::Tracks => app.play_from_current_view(),
         SearchSection::Albums => {
             if let Some(album) = album {
-                let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+                let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths);
+                let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
                 app.nav.push(View::AlbumDetail(state));
             }
         }
@@ -1307,6 +1315,11 @@ fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
                     StatusKind::Success,
                 );
                 app.reload_current_view();
+                // Generate TUI thumbnails for newly downloaded artwork in background
+                let paths_clone = app.paths.clone();
+                std::thread::spawn(move || {
+                    crate::tui_artwork::process_all_pending(&paths_clone);
+                });
             }
             Err(e) => {
                 if let View::Scan(s) = app.nav.current_mut() {
