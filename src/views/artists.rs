@@ -16,14 +16,14 @@ use tornade_core::models::Artist;
 use tornade_core::services::LibraryService;
 
 // Image height in terminal rows (fixed); width computed from font metrics for square cells
-const IMG_H: u16 = 8;
+const IMG_H: u16 = 14;
 // Text rows below the image
 const TEXT_H: u16 = 2;
 // Padding rows between image bottom and text
 const TEXT_PADDING: u16 = 1;
 // Gap between cells
-const GAP_W: u16 = 3;
-const GAP_H: u16 = 2;
+const GAP_W: u16 = 2;
+const GAP_H: u16 = 1;
 // Left/right padding inside the grid area
 const GRID_PAD: u16 = 1;
 
@@ -195,23 +195,20 @@ impl ArtistsState {
             .collect();
 
         // 1. Drain images decoded by background threads → encode into StatefulProtocol
+        //    Thumbnails are pre-generated at exact target pixel size, no runtime resize needed.
         if let Ok(mut pending) = self.pending_decoded.try_lock() {
             for (id, result) in pending.drain(..) {
                 self.loading_ids.remove(&id);
                 if let Some(img) = result {
                     self.image_cache.insert(id, picker.new_resize_protocol(img));
                 } else {
-                    // Permanent failure: mark so we never retry this id again.
                     self.failed_ids.insert(id);
                 }
             }
         }
 
         // 2. Spawn background threads for visible artists not yet in cache or loading.
-        //    Use a global atomic cap so threads from OLD states (after navigation) are
-        //    counted and prevent unbounded accumulation.
-        let (fw, fh) = (font.0, font.1);
-        let target_px = ((self.img_cols as u32) * (fw as u32)).max(1);
+        //    Thumbnails are pre-sized at target resolution, just load from disk.
         for (_, id, _, photo_path) in &visible {
             if ACTIVE_IMAGE_THREADS.load(Ordering::Relaxed) >= MAX_IMAGE_THREADS {
                 break;
@@ -228,17 +225,8 @@ impl ArtistsState {
                 ACTIVE_IMAGE_THREADS.fetch_add(1, Ordering::Relaxed);
                 let id = *id;
                 let pending = Arc::clone(&self.pending_decoded);
-                let target_h = ((IMG_H as u32) * (fh as u32)).max(1);
                 std::thread::spawn(move || {
-                    let result = image::open(&path).ok().map(|img| {
-                        let resized = img.resize_to_fill(
-                            target_px,
-                            target_h,
-                            image::imageops::FilterType::Triangle,
-                        );
-                        image::DynamicImage::ImageRgba8(resized.to_rgba8())
-                    });
-                    // Always push (even None on failure) so the id is cleared from loading_ids.
+                    let result = image::open(&path).ok();
                     if let Ok(mut guard) = pending.lock() {
                         guard.push((id, result));
                     }
@@ -306,7 +294,7 @@ fn render_cell(
     let img_rect = Rect { width: img_w, height: img_h, ..area };
 
     if let Some(proto) = protocol {
-        frame.render_stateful_widget(StatefulImage::new().resize(Resize::Crop(None)), img_rect, proto);
+        frame.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(Some(image::imageops::FilterType::Triangle))), img_rect, proto);
     } else {
         frame.render_widget(Block::default().style(Style::default().bg(Color::Rgb(50, 50, 55))), img_rect);
     }

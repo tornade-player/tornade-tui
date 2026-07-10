@@ -305,7 +305,7 @@ impl GenresState {
 
             let orig_idx = orig_indices.get(rel_idx).copied().unwrap_or(rel_idx);
             if let Some(Some(Some(proto))) = self.image_states.get_mut(orig_idx) {
-                frame.render_stateful_widget(StatefulImage::new(), cols[0], proto);
+                frame.render_stateful_widget(StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(image::imageops::FilterType::Triangle))), cols[0], proto);
             } else {
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(

@@ -15,14 +15,14 @@ use std::sync::{Arc, Mutex};
 use tornade_core::{models::Album, services::LibraryService};
 
 // Image height in terminal rows (fixed); width is computed from font metrics to make it square
-const IMG_H: u16 = 8;
+const IMG_H: u16 = 14;
 // Text rows below the image
 const TEXT_H: u16 = 3;
 // Padding rows between image bottom and text
 const TEXT_PADDING: u16 = 1;
 // Gap between cells (cols/rows)
-const GAP_W: u16 = 3;
-const GAP_H: u16 = 2;
+const GAP_W: u16 = 2;
+const GAP_H: u16 = 1;
 // Left/right padding inside the grid area
 const GRID_PAD: u16 = 1;
 /// Images decoded in background threads, waiting to be encoded by the picker on the main thread.
@@ -242,28 +242,28 @@ impl AlbumsState {
                 .collect()
         };
 
-        // 1. Drain images decoded by background threads → encode into StatefulProtocol
-        //    (picker.new_resize_protocol must run on the main thread)
-        {
-            if let Ok(mut pending) = self.pending_decoded.try_lock() {
-                for (id, result) in pending.drain(..) {
-                    self.loading_ids.remove(&id);
-                    if let Some(img) = result {
-                        self.image_cache.insert(id, picker.new_resize_protocol(img));
-                    } else {
-                        // Permanent failure: mark so we never retry this id again.
-                        self.failed_ids.insert(id);
-                    }
+        // 1. Drain up to 3 images per frame from background threads → encode into
+        //    StatefulProtocol. Rate-limited to keep the UI responsive (encoding is
+        //    CPU-intensive). Remaining images are picked up on the next 30ms redraw.
+        if let Ok(mut pending) = self.pending_decoded.try_lock() {
+            let mut encoded = 0u32;
+            pending.retain(|(id, result)| {
+                if encoded >= 3 {
+                    return true; // keep for next frame
                 }
-            }
+                self.loading_ids.remove(id);
+                if let Some(img) = result {
+                    self.image_cache.insert(*id, picker.new_resize_protocol(img.clone()));
+                } else {
+                    self.failed_ids.insert(*id);
+                }
+                encoded += 1;
+                false // remove from pending
+            });
         }
 
         // 2. Spawn background threads for visible images not yet in cache or loading.
-        //    Use the global atomic cap so threads from OLD states after navigation are counted.
-        let (fw, fh) = (font.0, font.1);
-        let target_px_w = (self.img_cols as u32) * (fw as u32);
-        let target_px_h = (IMG_H as u32) * (fh as u32);
-
+        //    Thumbnails are pre-sized at target resolution, just load from disk.
         for (_, id, _, _, _, online, local) in &visible {
             if ACTIVE_IMAGE_THREADS.load(Ordering::Relaxed) >= MAX_IMAGE_THREADS {
                 break;
@@ -284,15 +284,7 @@ impl AlbumsState {
                 let id = *id;
                 let pending = Arc::clone(&self.pending_decoded);
                 std::thread::spawn(move || {
-                    let result = image::open(&path).ok().map(|img| {
-                        let resized = img.resize_to_fill(
-                            target_px_w.max(1),
-                            target_px_h.max(1),
-                            image::imageops::FilterType::Triangle,
-                        );
-                        image::DynamicImage::ImageRgba8(resized.to_rgba8())
-                    });
-                    // Always push (even None on failure) so the id is cleared from loading_ids.
+                    let result = image::open(&path).ok();
                     if let Ok(mut guard) = pending.lock() {
                         guard.push((id, result));
                     }
@@ -390,7 +382,7 @@ fn render_cell(
 
     if let Some(proto) = protocol {
         frame.render_stateful_widget(
-            StatefulImage::new().resize(Resize::Crop(None)),
+            StatefulImage::new().resize(Resize::Fit(Some(image::imageops::FilterType::Triangle))),
             img_rect,
             proto,
         );

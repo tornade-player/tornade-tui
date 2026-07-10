@@ -59,17 +59,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Compute target pixel size for grid thumbnails from font metrics
+    let tui_target = tui_artwork::tui_target_size(picker.font_size(), 14);
+
     // Migrate existing artwork to TUI thumbnails in background (non-blocking)
     {
         let paths_clone = paths.clone();
         std::thread::spawn(move || {
-            tui_artwork::process_all_pending(&paths_clone);
+            tui_artwork::process_all_pending(&paths_clone, tui_target);
         });
     }
 
     // Build application state
     let mut app = AppState::new(
-        player, library, playlists, search_svc, artwork, paths, picker,
+        player, library, playlists, search_svc, artwork, paths, picker, tui_target,
     );
 
     // Run event loop
@@ -149,8 +152,9 @@ fn run_loop(
         }
 
         if last_tick.elapsed() >= tick_rate {
-            app.tick();
-            needs_redraw = true; // progress bar + player state may have changed
+            if app.tick() {
+                needs_redraw = true;
+            }
             last_tick = Instant::now();
         }
     }

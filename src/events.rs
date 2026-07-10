@@ -736,7 +736,7 @@ fn push_album_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths);
+        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
         let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
         app.nav.push(View::AlbumDetail(state));
     }
@@ -748,7 +748,7 @@ fn push_artist_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(artist) = artist {
-        let tui_dir = crate::tui_artwork::tui_artist_dir(&app.paths);
+        let tui_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
         let photo_dir = if tui_dir.join(format!("{}.jpg", artist.id)).exists() {
             tui_dir
         } else {
@@ -791,7 +791,7 @@ fn push_album_from_artist(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths);
+        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
         let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
         app.nav.push(View::AlbumDetail(state));
     }
@@ -811,7 +811,7 @@ fn handle_search_enter(app: &mut AppState) {
         SearchSection::Tracks => app.play_from_current_view(),
         SearchSection::Albums => {
             if let Some(album) = album {
-                let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths);
+                let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
                 let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
                 app.nav.push(View::AlbumDetail(state));
             }
@@ -1317,8 +1317,9 @@ fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
                 app.reload_current_view();
                 // Generate TUI thumbnails for newly downloaded artwork in background
                 let paths_clone = app.paths.clone();
+                let tui_target = app.tui_target;
                 std::thread::spawn(move || {
-                    crate::tui_artwork::process_all_pending(&paths_clone);
+                    crate::tui_artwork::process_all_pending(&paths_clone, tui_target);
                 });
             }
             Err(e) => {

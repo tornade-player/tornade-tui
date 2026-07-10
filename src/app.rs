@@ -152,6 +152,9 @@ pub struct AppState {
     pub right_queue_area: Option<ratatui::layout::Rect>,
     // Double-click detection: last click (col, row, instant)
     pub last_click: Option<(u16, u16, std::time::Instant)>,
+
+    // Target pixel size for grid thumbnails (computed from font metrics at startup)
+    pub tui_target: (u32, u32),
 }
 
 impl AppState {
@@ -163,6 +166,7 @@ impl AppState {
         artwork: ArtworkService,
         paths: AppPaths,
         picker: Picker,
+        tui_target: (u32, u32),
     ) -> Self {
         let mut state = Self {
             player,
@@ -201,6 +205,7 @@ impl AppState {
             sidebar_area: None,
             right_queue_area: None,
             last_click: None,
+            tui_target,
         };
         state.reload_current_view();
         state.refresh_sidebar_playlists();
@@ -208,20 +213,45 @@ impl AppState {
     }
 
     /// Poll player state and clear stale status. Called every 500ms.
-    pub fn tick(&mut self) {
+    /// Returns true if anything changed that needs a redraw.
+    pub fn tick(&mut self) -> bool {
+        let old_state = self.player_cache.state;
+        let old_pos = self.player_cache.position as u64;
+        let old_track = self.player_cache.current_track.as_ref().map(|t| t.id);
+        let old_queue_len = self.player_cache.queue.len();
+        let had_status = self.status.is_some();
+
         self.player_cache.poll(&self.player);
-        if self
+
+        let status_cleared = if self
             .status
             .as_ref()
             .is_some_and(|s| s.set_at.elapsed().as_secs() >= 3)
         {
             self.status = None;
-        }
+            true
+        } else {
+            false
+        };
+
         let skipped = self.player_cache.skipped_track_ids.clone();
         self.apply_skipped_ids(&skipped);
         self.refresh_queue_cache();
         self.refresh_sidebar_playlists();
         self.refresh_player_artwork();
+
+        // Only signal redraw if something visible changed
+        let new_state = self.player_cache.state;
+        let new_pos = self.player_cache.position as u64;
+        let new_track = self.player_cache.current_track.as_ref().map(|t| t.id);
+        let new_queue_len = self.player_cache.queue.len();
+
+        old_state != new_state
+            || old_pos != new_pos
+            || old_track != new_track
+            || old_queue_len != new_queue_len
+            || status_cleared
+            || (had_status && self.status.is_none())
     }
 
     fn refresh_player_artwork(&mut self) {
@@ -236,7 +266,7 @@ impl AppState {
             && let Ok(Some(album)) = self.library.get_album(album_id)
         {
             self.current_album_name = Some(album.title.clone());
-            let tui_dir = crate::tui_artwork::tui_album_dir(&self.paths);
+            let tui_dir = crate::tui_artwork::tui_album_dir(&self.paths, self.tui_target);
             let path = album
                 .online_artwork_path
                 .as_ref()

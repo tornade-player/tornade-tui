@@ -119,8 +119,8 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
 /// Returns true when background image loads are still in progress (caller should redraw soon).
 fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
-    let tui_album_dir = crate::tui_artwork::tui_album_dir(&app.paths);
-    let tui_artist_dir = crate::tui_artwork::tui_artist_dir(&app.paths);
+    let tui_album_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+    let tui_artist_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
     match app.nav.current_mut() {
         View::Library(s) => {
             s.render(frame, area, focused);

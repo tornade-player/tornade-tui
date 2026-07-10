@@ -173,7 +173,7 @@ impl ArtistDetailState {
 
             // Circle image - rendered directly, no border
             frame.render_stateful_widget(
-                StatefulImage::new().resize(ratatui_image::Resize::Fit(None)),
+                StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(image::imageops::FilterType::Triangle))),
                 h_chunks[0],
                 protocol,
             );
