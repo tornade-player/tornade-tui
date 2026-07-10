@@ -74,6 +74,28 @@ pub fn render(frame: &mut Frame) {
             ],
         ),
         (
+            "Edit tags & selection",
+            &[
+                ("e", "Edit tags (selection if any, else current track)"),
+                ("Tab / Shift+Tab", "Move between fields (in editor)"),
+                ("Ctrl+F", "Fetch metadata online (in editor)"),
+                ("Ctrl+I", "Manage cover artwork (in editor)"),
+                ("v", "Toggle multi-select mode"),
+                ("Space", "Mark / unmark track (in select mode)"),
+                ("a", "Select all (in select mode)"),
+                ("c / ESC", "Clear selection"),
+                ("A", "Add selection to playlist"),
+                ("D", "Remove selection from playlist (in playlist)"),
+            ],
+        ),
+        (
+            "Media keys",
+            &[(
+                "⏯ / ⏭ / ⏮",
+                "Hardware play-pause / next / previous (where supported)",
+            )],
+        ),
+        (
             "Commands (:)",
             &[
                 (":scan <path>", "Scan a folder"),

@@ -25,6 +25,9 @@ pub enum AsyncJob {
     /// Scrape recording (track-level) metadata candidates.
     ScrapeTrack { title: String, artist: String },
     /// Scrape release (album-level) metadata candidates.
+    /// Part of the worker's complete job API; album-level scrape is wired
+    /// through the artwork/metadata flows and reserved for album-context use.
+    #[allow(dead_code)]
     ScrapeAlbum { album: String, artist: String },
     /// Fetch album artwork bytes from Cover Art Archive.
     FetchAlbumArtwork { album: String, artist: String },
@@ -53,6 +56,7 @@ pub struct AsyncResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobStatus {
     /// No job has been launched (or the overlay is fresh).
+    #[allow(dead_code)]
     Idle,
     /// A job with this id is in flight.
     Searching(u64),

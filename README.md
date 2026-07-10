@@ -19,6 +19,10 @@ A terminal UI music player built on [tornade-core](https://github.com/tornade-pl
 - **Per-view filter**: press `/` in any list to narrow results in real time
 - **Command mode**: press `:` to run commands with autocompletion
 - **Track ratings**: press `0`-`5` to set star rating; displayed in all track lists
+- **Tag editing**: press `e` to edit title, artist, album, album artist, year, genre and track number for one track, or album-level fields across a multi-track selection; written to the file and database
+- **Online metadata & artwork**: fetch MusicBrainz suggestions (`Ctrl+F`) and manage cover art (`Ctrl+I`: set from file, fetch online, remove)
+- **Multi-select**: press `v` to select multiple tracks and add/remove them to/from playlists in bulk (duplicate-safe)
+- **Hardware media keys**: play/pause, next, previous on macOS, Windows, and Linux, with now-playing info published to the OS
 - **Library scanning** with progress view
 - **Mouse support**: sidebar, track list, queue, and player controls
 - Built with [ratatui](https://github.com/ratatui-org/ratatui)
