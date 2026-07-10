@@ -307,6 +307,16 @@ pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
 // ── Normal mode ──────────────────────────────────────────────────────────────
 
 fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
+    // US3 overlays sit ON TOP of the tag editor, so route to them first.
+    if app.scrape_picker.is_some() {
+        handle_scrape_picker(app, key);
+        return false;
+    }
+    if app.artwork_menu.is_some() {
+        handle_artwork_menu(app, key);
+        return false;
+    }
+
     // Tag editor overlay: while open, route ALL keys to the editor and do NOT
     // let them fall through to global handlers.
     if app.tag_editor.is_some() {
@@ -1261,6 +1271,22 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
 // ── Tag editor overlay ───────────────────────────────────────────────────────
 
 fn handle_tag_editor(app: &mut AppState, key: KeyEvent) {
+    // Ctrl+F: fetch online metadata for the edited track (opens the scrape
+    // picker). Ctrl+I: open the artwork action menu. Modifiers are required so
+    // these do not collide with plain-char text entry into the fields.
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('f') => {
+                app.open_scrape_for_current_edit();
+                return;
+            }
+            KeyCode::Char('i') => {
+                app.open_artwork_menu();
+                return;
+            }
+            _ => {}
+        }
+    }
     match key.code {
         KeyCode::Esc => {
             app.tag_editor = None;
@@ -1284,6 +1310,118 @@ fn handle_tag_editor(app: &mut AppState, key: KeyEvent) {
         KeyCode::Char(c) => {
             if let Some(ed) = app.tag_editor.as_mut() {
                 ed.push_char(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Scrape picker overlay (US3) ──────────────────────────────────────────────
+
+fn handle_scrape_picker(app: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.scrape_picker = None;
+        }
+        KeyCode::Enter => app.apply_scrape_candidate(),
+        KeyCode::Up => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.prev_candidate();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.next_candidate();
+            }
+        }
+        KeyCode::Left => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.prev_field();
+            }
+        }
+        KeyCode::Right | KeyCode::Tab => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.next_field();
+            }
+        }
+        KeyCode::BackTab => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.prev_field();
+            }
+        }
+        KeyCode::Char(' ') => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.toggle_field();
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Artwork action menu overlay (US3) ────────────────────────────────────────
+
+fn handle_artwork_menu(app: &mut AppState, key: KeyEvent) {
+    use crate::widgets::artwork_menu::ArtworkAction;
+
+    match key.code {
+        KeyCode::Esc => {
+            app.artwork_menu = None;
+        }
+        KeyCode::Up => {
+            if let Some(m) = app.artwork_menu.as_mut() {
+                m.prev();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(m) = app.artwork_menu.as_mut() {
+                m.next();
+            }
+        }
+        KeyCode::Enter => {
+            let Some(menu) = app.artwork_menu.as_ref() else {
+                return;
+            };
+            let targets = menu.targets.clone();
+            match menu.selected() {
+                ArtworkAction::SetFromFile => {
+                    // Keep the menu open state cleared; prompt for a file path.
+                    app.artwork_menu = None;
+                    app.text_input = Some(TextInputCtx {
+                        prompt: "Image file path:".to_string(),
+                        value: String::new(),
+                        action: TextInputAction::SetArtworkFromFile { track_ids: targets },
+                    });
+                    app.input_mode = InputMode::TextInput;
+                }
+                ArtworkAction::FetchOnline => {
+                    // Derive album + artist from the first target's current tags.
+                    let (album, artist) = targets
+                        .first()
+                        .and_then(|&id| app.metadata_edit.current_track_update(id).ok())
+                        .map(|u| {
+                            (
+                                u.album_title.clone().unwrap_or_default(),
+                                u.album_artist_name
+                                    .clone()
+                                    .unwrap_or_else(|| u.artist_name.clone()),
+                            )
+                        })
+                        .unwrap_or_default();
+                    if album.is_empty() && artist.is_empty() {
+                        app.set_status("No album/artist to search artwork", StatusKind::Info);
+                        app.artwork_menu = None;
+                    } else {
+                        let _ = app.async_worker.submit(
+                            crate::async_worker::AsyncJob::FetchAlbumArtwork { album, artist },
+                        );
+                        app.set_status("Fetching artwork online…", StatusKind::Info);
+                        // Menu stays open so on_async_result can apply to its targets.
+                    }
+                }
+                ArtworkAction::Remove => {
+                    app.remove_artwork(&targets);
+                    app.artwork_menu = None;
+                }
             }
         }
         _ => {}
@@ -1536,6 +1674,10 @@ fn execute_text_input(app: &mut AppState, action: TextInputAction, value: String
                     Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
                 }
             }
+        }
+        TextInputAction::SetArtworkFromFile { track_ids } => {
+            let path = expand_tilde(&value);
+            app.set_artwork_from_file(&track_ids, path);
         }
     }
 }

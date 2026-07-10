@@ -258,6 +258,14 @@ fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
         crate::widgets::tag_editor::render(frame, editor);
     }
 
+    // US3 overlays sit on top of the tag editor.
+    if let Some(ref picker) = app.scrape_picker {
+        crate::widgets::scrape_picker::render(frame, picker);
+    }
+    if let Some(ref menu) = app.artwork_menu {
+        crate::widgets::artwork_menu::render(frame, menu);
+    }
+
     // Help overlay (always on top)
     if app.show_help {
         help_overlay::render(frame);

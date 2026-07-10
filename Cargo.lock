@@ -4102,6 +4102,7 @@ dependencies = [
  "log",
  "ratatui",
  "ratatui-image",
+ "reqwest",
  "serde",
  "serde_json",
  "souvlaki",

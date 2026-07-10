@@ -30,3 +30,6 @@ souvlaki = "0.7"
 
 # Async driver for core reqwest-based scrape/artwork calls on a worker thread - feature 012
 tokio = { version = "1", features = ["rt", "macros", "time"] }
+
+# HTTP client used to build the core MusicBrainzClient (matches tornade-core) - feature 012
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }

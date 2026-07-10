@@ -84,6 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         search_svc,
         metadata_edit,
         artwork,
+        pool.clone(),
         paths,
         picker,
         tui_target,
@@ -162,6 +163,12 @@ fn run_loop(
         } else if app.has_pending_images {
             // Poll timed out while background image loads are in progress: redraw to pick up
             // any newly decoded images that background threads may have pushed to the queue.
+            needs_redraw = true;
+        }
+
+        // Drain any completed async jobs (online scrape / artwork). `poll_async`
+        // loops internally so we don't hold a borrow of `async_worker`.
+        if app.poll_async() {
             needs_redraw = true;
         }
 

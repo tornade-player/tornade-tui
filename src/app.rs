@@ -1,4 +1,5 @@
 use crate::{
+    async_worker::{AsyncJob, AsyncPayload, AsyncResult, AsyncWorker},
     navigation::NavigationStack,
     player::PlayerStateCache,
     views::queue::ToolbarHitZones,
@@ -6,13 +7,17 @@ use crate::{
         AlbumsState, ArtistsState, GenresState, LibraryState, PlaylistDetailState, PlaylistsState,
         QueueState, SearchState, SidebarEntry, View,
     },
+    widgets::artwork_menu::ArtworkMenuState,
     widgets::player_bar::PlayerHitZones,
-    widgets::tag_editor::TagEditorState,
+    widgets::scrape_picker::{CandidateField, ScrapePickerState},
+    widgets::tag_editor::{Field, TagEditorState},
 };
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Instant;
 use tornade_core::{
+    db::DbPool,
     models::Track,
     services::{
         ArtworkService, LibraryService, MetadataEditService, PlaybackState, PlayerService,
@@ -65,9 +70,15 @@ pub struct TextInputCtx {
 pub enum TextInputAction {
     ScanPath,
     CreatePlaylist,
-    RenamePlaylist { id: i64 },
+    RenamePlaylist {
+        id: i64,
+    },
     ImportM3u,
     SaveQueueAsPlaylist,
+    /// Path to a local image file to set as artwork for the given track ids.
+    SetArtworkFromFile {
+        track_ids: Vec<i64>,
+    },
 }
 
 /// Context for a pending confirmation dialog.
@@ -135,6 +146,8 @@ pub struct AppState {
     pub metadata_edit: MetadataEditService,
     #[allow(dead_code)] // held to keep the service alive (background artwork downloads)
     pub artwork: ArtworkService,
+    /// DB connection pool, used for direct artwork queries (US3).
+    pub pool: DbPool,
     pub paths: AppPaths,
     pub picker: Picker,
 
@@ -158,6 +171,12 @@ pub struct AppState {
     pub playlist_selector_state: ratatui::widgets::ListState,
     /// Tag editor overlay state; `Some` when the editor is open.
     pub tag_editor: Option<TagEditorState>,
+    /// Online scrape picker overlay state; `Some` when open (US3).
+    pub scrape_picker: Option<ScrapePickerState>,
+    /// Artwork action menu overlay state; `Some` when open (US3).
+    pub artwork_menu: Option<ArtworkMenuState>,
+    /// Worker thread handle for async MusicBrainz / artwork calls (US3).
+    pub async_worker: AsyncWorker,
 
     // Panel focus
     pub focused_panel: FocusedPanel,
@@ -215,6 +234,7 @@ impl AppState {
         search_svc: SearchService,
         metadata_edit: MetadataEditService,
         artwork: ArtworkService,
+        pool: DbPool,
         paths: AppPaths,
         picker: Picker,
         tui_target: (u32, u32),
@@ -226,6 +246,7 @@ impl AppState {
             search_svc,
             metadata_edit,
             artwork,
+            pool,
             paths,
             picker,
             nav: NavigationStack::new(View::Library(LibraryState::default())),
@@ -240,6 +261,9 @@ impl AppState {
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
             tag_editor: None,
+            scrape_picker: None,
+            artwork_menu: None,
+            async_worker: AsyncWorker::spawn(),
             focused_panel: FocusedPanel::Content,
             sidebar_cursor: 0,
             right_panel_queue_state: ratatui::widgets::ListState::default(),
@@ -821,6 +845,291 @@ impl AppState {
                 }
                 Err(e) => self.set_status(format!("Error: {}", e), StatusKind::Error),
             }
+        }
+    }
+
+    // ── US3: online scrape + artwork ─────────────────────────────────────────
+
+    /// Drain any completed async jobs, folding each into the UI state.
+    ///
+    /// Kept as a helper so the run loop can drive it without holding a borrow of
+    /// `async_worker` across the `on_async_result` call. Returns true if at least
+    /// one result was processed (caller should redraw).
+    pub fn poll_async(&mut self) -> bool {
+        let mut any = false;
+        while let Some(result) = self.async_worker.try_recv() {
+            self.on_async_result(result);
+            any = true;
+        }
+        any
+    }
+
+    /// Fold a completed async result into the scrape picker / artwork menu.
+    ///
+    /// Stale results (whose `job_id` does not match the overlay currently waiting
+    /// on them) are ignored.
+    pub fn on_async_result(&mut self, result: AsyncResult) {
+        // Scrape picker: match the job id and update status / candidates.
+        if let Some(picker) = self.scrape_picker.as_mut()
+            && let Some(status) = crate::async_worker::status_for(picker.job_id, &result)
+        {
+            match result.payload {
+                AsyncPayload::Candidates(candidates) => picker.set_candidates(candidates),
+                AsyncPayload::Failed(msg) => picker.set_failed(msg),
+                AsyncPayload::Artwork(_) => picker.status = status,
+            }
+            return;
+        }
+
+        // Artwork menu: an online fetch resolved. Apply bytes to the targets.
+        if self.artwork_menu.is_some() {
+            match result.payload {
+                AsyncPayload::Artwork(Some(bytes)) => {
+                    let targets = self
+                        .artwork_menu
+                        .as_ref()
+                        .map(|m| m.targets.clone())
+                        .unwrap_or_default();
+                    self.set_artwork_from_bytes(&targets, &bytes);
+                    self.artwork_menu = None;
+                }
+                AsyncPayload::Artwork(None) => {
+                    self.set_status("No artwork found online", StatusKind::Info);
+                    self.artwork_menu = None;
+                }
+                AsyncPayload::Failed(msg) => {
+                    self.set_status(format!("Artwork fetch failed: {msg}"), StatusKind::Error);
+                    self.artwork_menu = None;
+                }
+                AsyncPayload::Candidates(_) => {}
+            }
+        }
+    }
+
+    /// Open the online scrape picker for the track currently in the tag editor.
+    ///
+    /// Uses the (possibly edited) title + artist from the editor as the query and
+    /// submits a `ScrapeTrack` job, showing the picker in its searching state.
+    pub fn open_scrape_for_current_edit(&mut self) {
+        let Some(editor) = self.tag_editor.as_ref() else {
+            return;
+        };
+        let title = editor.value(Field::Title).trim().to_string();
+        let artist = editor.value(Field::Artist).trim().to_string();
+        if title.is_empty() && artist.is_empty() {
+            self.set_status("Nothing to search (empty title/artist)", StatusKind::Info);
+            return;
+        }
+        let job_id = self
+            .async_worker
+            .submit(AsyncJob::ScrapeTrack { title, artist });
+        self.scrape_picker = Some(ScrapePickerState::searching(job_id));
+    }
+
+    /// Open the artwork action menu.
+    ///
+    /// Targets are the active multi-selection if present, otherwise the single
+    /// track currently in the tag editor.
+    pub fn open_artwork_menu(&mut self) {
+        let targets: Vec<i64> = if self.selection.is_active() {
+            self.selection.selected_ids.iter().copied().collect()
+        } else if let Some(editor) = self.tag_editor.as_ref() {
+            editor.targets.clone()
+        } else {
+            Vec::new()
+        };
+        if targets.is_empty() {
+            return;
+        }
+        self.artwork_menu = Some(ArtworkMenuState::new(targets));
+    }
+
+    /// Apply the accepted fields of the selected scrape candidate to the edited
+    /// track, then close the picker and reload the current view.
+    pub fn apply_scrape_candidate(&mut self) {
+        let Some(picker) = self.scrape_picker.as_ref() else {
+            return;
+        };
+        let Some(candidate) = picker.current() else {
+            self.scrape_picker = None;
+            return;
+        };
+        // Determine the single target track (scrape applies to the edited track).
+        let Some(&track_id) = self.tag_editor.as_ref().and_then(|e| e.targets.first()) else {
+            self.scrape_picker = None;
+            return;
+        };
+
+        // Baseline: keep existing values, override only accepted fields that carry
+        // a value in the candidate.
+        let mut update = match self.metadata_edit.current_track_update(track_id) {
+            Ok(u) => u,
+            Err(e) => {
+                self.set_status(format!("Cannot apply: {e}"), StatusKind::Error);
+                self.scrape_picker = None;
+                return;
+            }
+        };
+
+        let accept = |f: CandidateField| picker.is_accepted(f) && picker.field_value(f).is_some();
+        if accept(CandidateField::Title) {
+            update.title = candidate.title.clone();
+        }
+        if accept(CandidateField::Artist) {
+            update.artist_name = candidate.artist.clone();
+        }
+        if accept(CandidateField::AlbumArtist) {
+            update.album_artist_name = candidate.album_artist.clone();
+        }
+        if accept(CandidateField::Album) {
+            update.album_title = candidate.album.clone();
+        }
+        if accept(CandidateField::Year) {
+            update.year = candidate.year;
+        }
+        if accept(CandidateField::Genre) {
+            // GENRE (C1): the tag model is single-value; take the first genre only.
+            update.genre_names = candidate.genres.first().cloned().into_iter().collect();
+        }
+        if accept(CandidateField::TrackNumber) {
+            update.track_number = candidate.track_number;
+        }
+
+        match self.metadata_edit.update_track(track_id, &update) {
+            Ok(r) if r.ok => {
+                self.set_status("Applied online metadata", StatusKind::Success);
+                self.reload_current_view_tracks();
+                // Refresh the tag editor prefill so the user sees the applied values.
+                if let Ok(current) = self.metadata_edit.current_track_update(track_id) {
+                    self.tag_editor = Some(TagEditorState::single(track_id, current));
+                }
+            }
+            Ok(_) => self.set_status("Apply failed", StatusKind::Error),
+            Err(e) => self.set_status(format!("Apply failed: {e}"), StatusKind::Error),
+        }
+        self.scrape_picker = None;
+    }
+
+    /// Set artwork for `track_ids` from a local image file (mirrors
+    /// `ffi.rs::set_track_artwork_from_path`): validate size, hash, copy into the
+    /// artwork cache, and update the DB for each target.
+    pub fn set_artwork_from_file(&mut self, track_ids: &[i64], path: PathBuf) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => m,
+            Err(e) => {
+                self.set_status(format!("Cannot read image: {e}"), StatusKind::Error);
+                return;
+            }
+        };
+        const MAX_SIZE: u64 = 10 * 1024 * 1024;
+        let file_size = metadata.len();
+        if file_size > MAX_SIZE {
+            let size_mb = file_size as f64 / (1024.0 * 1024.0);
+            self.set_status(
+                format!("Image exceeds 10 MB limit ({size_mb:.1} MB)"),
+                StatusKind::Error,
+            );
+            return;
+        }
+
+        let path_str = path.to_string_lossy();
+        let mut hasher = DefaultHasher::new();
+        path_str.hash(&mut hasher);
+        file_size.hash(&mut hasher);
+        let hash = format!("{:x}", hasher.finish());
+
+        let cache_dir = self.paths.artwork_cache_dir();
+        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+            self.set_status(format!("Cannot create cache dir: {e}"), StatusKind::Error);
+            return;
+        }
+        let dest_path = cache_dir.join(format!("{hash}.jpg"));
+        if let Err(e) = std::fs::copy(&path, &dest_path) {
+            self.set_status(format!("Cannot copy image: {e}"), StatusKind::Error);
+            return;
+        }
+        let dest_str = dest_path.to_string_lossy().to_string();
+
+        self.apply_artwork_path(track_ids, &dest_str, &hash);
+    }
+
+    /// Set artwork for `track_ids` from raw image bytes (downloaded online):
+    /// write to the artwork cache then update the DB for each target.
+    fn set_artwork_from_bytes(&mut self, track_ids: &[i64], bytes: &[u8]) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        let hash = format!("{:x}", hasher.finish());
+
+        let cache_dir = self.paths.artwork_cache_dir();
+        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+            self.set_status(format!("Cannot create cache dir: {e}"), StatusKind::Error);
+            return;
+        }
+        let dest_path = cache_dir.join(format!("{hash}.jpg"));
+        if let Err(e) = std::fs::write(&dest_path, bytes) {
+            self.set_status(format!("Cannot write artwork: {e}"), StatusKind::Error);
+            return;
+        }
+        let dest_str = dest_path.to_string_lossy().to_string();
+
+        self.apply_artwork_path(track_ids, &dest_str, &hash);
+    }
+
+    /// Write an artwork path/hash to the DB for each target track and report.
+    fn apply_artwork_path(&mut self, track_ids: &[i64], dest_str: &str, hash: &str) {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_status(format!("DB error: {e}"), StatusKind::Error);
+                return;
+            }
+        };
+        let mut failed = 0usize;
+        for &id in track_ids {
+            if tornade_core::db::queries::set_track_artwork(&conn, id, dest_str, hash).is_err() {
+                failed += 1;
+            }
+        }
+        if failed == 0 {
+            self.set_status("Artwork set", StatusKind::Success);
+            self.player_artwork_track_id = None; // force artwork refresh on next tick
+        } else {
+            self.set_status(
+                format!("Failed to set artwork for {failed} track(s)"),
+                StatusKind::Error,
+            );
+        }
+    }
+
+    /// Remove artwork for each target track.
+    pub fn remove_artwork(&mut self, track_ids: &[i64]) {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_status(format!("DB error: {e}"), StatusKind::Error);
+                return;
+            }
+        };
+        let mut failed = 0usize;
+        for &id in track_ids {
+            if tornade_core::db::queries::remove_track_artwork(&conn, id).is_err() {
+                failed += 1;
+            }
+        }
+        if failed == 0 {
+            self.set_status("Artwork removed", StatusKind::Success);
+            self.player_artwork_track_id = None;
+        } else {
+            self.set_status(
+                format!("Failed to remove artwork for {failed} track(s)"),
+                StatusKind::Error,
+            );
         }
     }
 }
