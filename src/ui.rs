@@ -121,9 +121,10 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
     let tui_album_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
     let tui_artist_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
+    let selection = app.selection.clone();
     match app.nav.current_mut() {
         View::Library(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::Albums(s) => s.render(frame, area, focused, &mut app.picker, &tui_album_dir),
@@ -134,16 +135,16 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
             false
         }
         View::AlbumDetail(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::ArtistDetail(s) => s.render(frame, area, focused, &mut app.picker),
         View::GenreDetail(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::PlaylistDetail(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::Scan(s) => {
@@ -151,7 +152,7 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
             false
         }
         View::Search(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::Queue(s) => {
@@ -169,9 +170,18 @@ fn render_queue_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
     // Borrow cached_queue_tracks and nav as separate fields so the borrow checker is happy
     let tracks = &app.cached_queue_tracks;
+    let selection = app.selection.clone();
     if let View::Queue(s) = app.nav.current_mut() {
         s.sync_selection(tracks.len(), active_index);
-        s.render(frame, area, tracks, active_index, &skipped, focused);
+        s.render(
+            frame,
+            area,
+            tracks,
+            active_index,
+            &skipped,
+            focused,
+            &selection,
+        );
     }
 }
 
@@ -241,6 +251,11 @@ fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
     // Playlist selector overlay
     if app.show_playlist_selector {
         render_playlist_selector(frame, app, area);
+    }
+
+    // Tag editor overlay
+    if let Some(ref editor) = app.tag_editor {
+        crate::widgets::tag_editor::render(frame, editor);
     }
 
     // Help overlay (always on top)

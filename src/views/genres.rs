@@ -129,7 +129,14 @@ impl GenresState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker, tui_dir: &std::path::Path) -> bool {
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        picker: &mut Picker,
+        tui_dir: &std::path::Path,
+    ) -> bool {
         let chunks = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
@@ -152,7 +159,16 @@ impl GenresState {
                 .collect();
             let names: Vec<String> = filtered.iter().map(|(g, _, _)| g.name.clone()).collect();
             drop(filtered);
-            self.render_with_images(frame, chunks[2], &names, &orig_indices, selected, focused, picker, tui_dir)
+            self.render_with_images(
+                frame,
+                chunks[2],
+                &names,
+                &orig_indices,
+                selected,
+                focused,
+                picker,
+                tui_dir,
+            )
         } else {
             let items: Vec<ListItem> = filtered
                 .iter()
@@ -305,7 +321,13 @@ impl GenresState {
 
             let orig_idx = orig_indices.get(rel_idx).copied().unwrap_or(rel_idx);
             if let Some(Some(Some(proto))) = self.image_states.get_mut(orig_idx) {
-                frame.render_stateful_widget(StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(image::imageops::FilterType::Triangle))), cols[0], proto);
+                frame.render_stateful_widget(
+                    StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(
+                        image::imageops::FilterType::Triangle,
+                    ))),
+                    cols[0],
+                    proto,
+                );
             } else {
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(

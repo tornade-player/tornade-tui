@@ -14,15 +14,14 @@ mod tests {
     use ratatui_image::picker::Picker;
     use std::path::PathBuf;
     use std::time::Duration;
-    use tornade_core::models::{Album, Artist, AudioFormat, Genre, Rating, Track};
     use tornade_core::models::playlist::Playlist;
+    use tornade_core::models::{Album, Artist, AudioFormat, Genre, Rating, Track};
 
-    use crate::views::{
-        AlbumsState, ArtistsState, GenresState, LibraryState, PlaylistsState,
-    };
-    use crate::views::search::{SearchSection, SearchState};
+    use crate::app::Selection;
     use crate::views::queue::QueueState;
     use crate::views::scan::ScanState;
+    use crate::views::search::{SearchSection, SearchState};
+    use crate::views::{AlbumsState, ArtistsState, GenresState, LibraryState, PlaylistsState};
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -49,8 +48,11 @@ mod tests {
                     out.push('▓');
                 } else if is_cyan && is_bold {
                     out.push('<');
-                    if ch.chars().all(|c| c.is_control() || c == '\0') { out.push('·'); }
-                    else { out.push_str(ch); }
+                    if ch.chars().all(|c| c.is_control() || c == '\0') {
+                        out.push('·');
+                    } else {
+                        out.push_str(ch);
+                    }
                     out.push('>');
                 } else if ch.chars().all(|c| c.is_control() || c == '\0') {
                     out.push(' ');
@@ -63,11 +65,11 @@ mod tests {
         out
     }
 
-    fn render<F: FnOnce(&mut ratatui::Frame, Rect)>(
-        w: u16, h: u16, f: F,
-    ) -> Terminal<TestBackend> {
+    fn render<F: FnOnce(&mut ratatui::Frame, Rect)>(w: u16, h: u16, f: F) -> Terminal<TestBackend> {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal.draw(|frame| f(frame, Rect::new(0, 0, w, h))).unwrap();
+        terminal
+            .draw(|frame| f(frame, Rect::new(0, 0, w, h)))
+            .unwrap();
         terminal
     }
 
@@ -95,6 +97,7 @@ mod tests {
             last_played_at: None,
             play_count: 0,
             artist_names: vec![artist.into()],
+            year: None,
         }
     }
 
@@ -113,19 +116,37 @@ mod tests {
 
     fn mock_artists() -> Vec<Artist> {
         vec![
-            "Queen", "Eagles", "Led Zeppelin", "Pink Floyd",
-            "Nirvana", "Jimi Hendrix", "Bob Dylan", "Chuck Berry",
-            "The Beatles", "The Rolling Stones", "David Bowie", "Radiohead",
+            "Queen",
+            "Eagles",
+            "Led Zeppelin",
+            "Pink Floyd",
+            "Nirvana",
+            "Jimi Hendrix",
+            "Bob Dylan",
+            "Chuck Berry",
+            "The Beatles",
+            "The Rolling Stones",
+            "David Bowie",
+            "Radiohead",
         ]
         .into_iter()
         .enumerate()
         .map(|(i, name)| Artist {
             id: i as i64 + 1,
             name: name.into(),
-            name_sort: None, bio: None, country: None, genre: None,
-            style: None, mood: None, formed_year: None, born_year: None,
-            died_year: None, disbanded: None, musicbrainz_id: None,
-            theaudiodb_id: None, photo_path: None,
+            name_sort: None,
+            bio: None,
+            country: None,
+            genre: None,
+            style: None,
+            mood: None,
+            formed_year: None,
+            born_year: None,
+            died_year: None,
+            disbanded: None,
+            musicbrainz_id: None,
+            theaudiodb_id: None,
+            photo_path: None,
         })
         .collect()
     }
@@ -165,22 +186,84 @@ mod tests {
 
     fn mock_genres() -> Vec<(Genre, u32, u32)> {
         vec![
-            (Genre { id: 1, name: "Rock".into() }, 42, 8),
-            (Genre { id: 2, name: "Jazz".into() }, 18, 3),
-            (Genre { id: 3, name: "Electronic".into() }, 75, 12),
-            (Genre { id: 4, name: "Classical".into() }, 30, 6),
-            (Genre { id: 5, name: "Hip-Hop".into() }, 55, 9),
+            (
+                Genre {
+                    id: 1,
+                    name: "Rock".into(),
+                },
+                42,
+                8,
+            ),
+            (
+                Genre {
+                    id: 2,
+                    name: "Jazz".into(),
+                },
+                18,
+                3,
+            ),
+            (
+                Genre {
+                    id: 3,
+                    name: "Electronic".into(),
+                },
+                75,
+                12,
+            ),
+            (
+                Genre {
+                    id: 4,
+                    name: "Classical".into(),
+                },
+                30,
+                6,
+            ),
+            (
+                Genre {
+                    id: 5,
+                    name: "Hip-Hop".into(),
+                },
+                55,
+                9,
+            ),
         ]
     }
 
     fn mock_playlists() -> Vec<Playlist> {
+        use tornade_core::models::playlist::PlaylistTrack;
+        let pt = |ids: &[i64]| -> Vec<PlaylistTrack> {
+            ids.iter()
+                .map(|&track_id| PlaylistTrack {
+                    track_id,
+                    added_at: "2024-01-01".into(),
+                })
+                .collect()
+        };
         vec![
-            Playlist { id: 1, name: "Favourites".into(), description: None,
-                tracks: vec![1,2,3], created_at: "2024-01-01".into(), updated_at: "2024-01-01".into() },
-            Playlist { id: 2, name: "Road Trip".into(), description: Some("Best for driving".into()),
-                tracks: vec![4,5,6,7], created_at: "2024-01-01".into(), updated_at: "2024-01-01".into() },
-            Playlist { id: 3, name: "Chill".into(), description: None,
-                tracks: vec![8], created_at: "2024-01-01".into(), updated_at: "2024-01-01".into() },
+            Playlist {
+                id: 1,
+                name: "Favourites".into(),
+                description: None,
+                tracks: pt(&[1, 2, 3]),
+                created_at: "2024-01-01".into(),
+                updated_at: "2024-01-01".into(),
+            },
+            Playlist {
+                id: 2,
+                name: "Road Trip".into(),
+                description: Some("Best for driving".into()),
+                tracks: pt(&[4, 5, 6, 7]),
+                created_at: "2024-01-01".into(),
+                updated_at: "2024-01-01".into(),
+            },
+            Playlist {
+                id: 3,
+                name: "Chill".into(),
+                description: None,
+                tracks: pt(&[8]),
+                created_at: "2024-01-01".into(),
+                updated_at: "2024-01-01".into(),
+            },
         ]
     }
 
@@ -193,9 +276,13 @@ mod tests {
         state.total_count = state.tracks.len() as i64;
         state.list_state.select(Some(0));
 
-        let t = render(80, 30, |frame, area| state.render(frame, area, true));
+        let sel = Selection::default();
+        let t = render(80, 30, |frame, area| state.render(frame, area, true, &sel));
         let out = dump_buffer(&t);
-        dump_to_file("library_80x30", &format!("=== Library (80x30, focused, selected=0) ===\n{out}"));
+        dump_to_file(
+            "library_80x30",
+            &format!("=== Library (80x30, focused, selected=0) ===\n{out}"),
+        );
     }
 
     #[test]
@@ -207,9 +294,53 @@ mod tests {
         state.filter_active = true;
         state.list_state.select(Some(0));
 
-        let t = render(80, 30, |frame, area| state.render(frame, area, true));
+        let sel = Selection::default();
+        let t = render(80, 30, |frame, area| state.render(frame, area, true, &sel));
         let out = dump_buffer(&t);
-        dump_to_file("library_filter", &format!("=== Library (filter='queen') ===\n{out}"));
+        dump_to_file(
+            "library_filter",
+            &format!("=== Library (filter='queen') ===\n{out}"),
+        );
+    }
+
+    // ─── Multi-select (US2) ────────────────────────────────────────────────────
+
+    /// T033: selection markers ([x]/[ ]) and the "N selected" count must render
+    /// when selection mode is active.
+    #[test]
+    fn render_library_selection_markers_and_count() {
+        let mut state = LibraryState::default();
+        state.tracks = mock_tracks();
+        state.total_count = state.tracks.len() as i64;
+        state.list_state.select(Some(0));
+
+        // Selection mode on, tracks 1 and 3 marked.
+        let mut sel = Selection::default();
+        sel.selection_mode = true;
+        sel.selected_ids.insert(1);
+        sel.selected_ids.insert(3);
+
+        let t = render(80, 30, |frame, area| state.render(frame, area, true, &sel));
+        let out = dump_buffer(&t);
+        dump_to_file(
+            "library_selection",
+            &format!("=== Library (selection mode, 2 selected) ===\n{out}"),
+        );
+
+        // Checkbox markers for both selected and unselected rows are visible.
+        assert!(
+            out.contains("[x]"),
+            "selected rows must show a checked marker\n{out}"
+        );
+        assert!(
+            out.contains("[ ]"),
+            "unselected rows must show an empty marker\n{out}"
+        );
+        // Live selection count is displayed.
+        assert!(
+            out.contains("2 selected"),
+            "selection count must be displayed\n{out}"
+        );
     }
 
     // ─── Albums grid ─────────────────────────────────────────────────────────
@@ -220,9 +351,14 @@ mod tests {
         state.albums = mock_albums();
         let mut picker = Picker::halfblocks();
 
-        let t = render(80, 30, |frame, area| { state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp")); });
+        let t = render(80, 30, |frame, area| {
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+        });
         let out = dump_buffer(&t);
-        dump_to_file("albums_80x30", &format!("=== Albums grid (80x30, selected=0) ===\n{out}"));
+        dump_to_file(
+            "albums_80x30",
+            &format!("=== Albums grid (80x30, selected=0) ===\n{out}"),
+        );
     }
 
     #[test]
@@ -232,9 +368,14 @@ mod tests {
         state.selected = 5;
         let mut picker = Picker::halfblocks();
 
-        let t = render(80, 30, |frame, area| { state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp")); });
+        let t = render(80, 30, |frame, area| {
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+        });
         let out = dump_buffer(&t);
-        dump_to_file("albums_selected5", &format!("=== Albums grid (selected=5) ===\n{out}"));
+        dump_to_file(
+            "albums_selected5",
+            &format!("=== Albums grid (selected=5) ===\n{out}"),
+        );
     }
 
     // ─── Artists grid ─────────────────────────────────────────────────────────
@@ -245,9 +386,14 @@ mod tests {
         state.artists = mock_artists();
         let mut picker = Picker::halfblocks();
 
-        let t = render(80, 30, |frame, area| { state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp")); });
+        let t = render(80, 30, |frame, area| {
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+        });
         let out = dump_buffer(&t);
-        dump_to_file("artists_80x30", &format!("=== Artists grid (80x30, selected=0) ===\n{out}"));
+        dump_to_file(
+            "artists_80x30",
+            &format!("=== Artists grid (80x30, selected=0) ===\n{out}"),
+        );
     }
 
     #[test]
@@ -257,9 +403,14 @@ mod tests {
         state.selected = 5;
         let mut picker = Picker::halfblocks();
 
-        let t = render(80, 30, |frame, area| { state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp")); });
+        let t = render(80, 30, |frame, area| {
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+        });
         let out = dump_buffer(&t);
-        dump_to_file("artists_selected5", &format!("=== Artists grid (selected=5) ===\n{out}"));
+        dump_to_file(
+            "artists_selected5",
+            &format!("=== Artists grid (selected=5) ===\n{out}"),
+        );
     }
 
     #[test]
@@ -270,9 +421,14 @@ mod tests {
         state.filter_active = true;
         let mut picker = Picker::halfblocks();
 
-        let t = render(80, 30, |frame, area| { state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp")); });
+        let t = render(80, 30, |frame, area| {
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+        });
         let out = dump_buffer(&t);
-        dump_to_file("artists_filter", &format!("=== Artists grid (filter='the') ===\n{out}"));
+        dump_to_file(
+            "artists_filter",
+            &format!("=== Artists grid (filter='the') ===\n{out}"),
+        );
     }
 
     // ─── Genres list ──────────────────────────────────────────────────────────
@@ -283,9 +439,14 @@ mod tests {
         state.genres = mock_genres();
         let mut picker = Picker::halfblocks();
 
-        let t = render(80, 30, |frame, area| { state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp")); });
+        let t = render(80, 30, |frame, area| {
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+        });
         let out = dump_buffer(&t);
-        dump_to_file("genres_80x30", &format!("=== Genres (80x30, no images) ===\n{out}"));
+        dump_to_file(
+            "genres_80x30",
+            &format!("=== Genres (80x30, no images) ===\n{out}"),
+        );
     }
 
     #[test]
@@ -296,9 +457,14 @@ mod tests {
         state.filter_active = true;
         let mut picker = Picker::halfblocks();
 
-        let t = render(80, 30, |frame, area| { state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp")); });
+        let t = render(80, 30, |frame, area| {
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+        });
         let out = dump_buffer(&t);
-        dump_to_file("genres_filter", &format!("=== Genres (filter='rock') ===\n{out}"));
+        dump_to_file(
+            "genres_filter",
+            &format!("=== Genres (filter='rock') ===\n{out}"),
+        );
     }
 
     // ─── Playlists ────────────────────────────────────────────────────────────
@@ -311,7 +477,10 @@ mod tests {
 
         let t = render(80, 30, |frame, area| state.render(frame, area, true));
         let out = dump_buffer(&t);
-        dump_to_file("playlists_80x30", &format!("=== Playlists (80x30) ===\n{out}"));
+        dump_to_file(
+            "playlists_80x30",
+            &format!("=== Playlists (80x30) ===\n{out}"),
+        );
     }
 
     // ─── Queue ────────────────────────────────────────────────────────────────
@@ -321,11 +490,15 @@ mod tests {
         let mut state = QueueState::default();
         let tracks = mock_tracks();
 
+        let sel = Selection::default();
         let t = render(60, 30, |frame, area| {
-            state.render(frame, area, &tracks, 2, &[], true);
+            state.render(frame, area, &tracks, 2, &[], true, &sel);
         });
         let out = dump_buffer(&t);
-        dump_to_file("queue_60x30", &format!("=== Queue (60x30, active=2) ===\n{out}"));
+        dump_to_file(
+            "queue_60x30",
+            &format!("=== Queue (60x30, active=2) ===\n{out}"),
+        );
     }
 
     // Queue filter lives in AppState.queue_filter, not QueueState - skip filter test here
@@ -336,7 +509,8 @@ mod tests {
     fn render_search_empty() {
         let mut state = SearchState::default();
 
-        let t = render(80, 30, |frame, area| state.render(frame, area, true));
+        let sel = Selection::default();
+        let t = render(80, 30, |frame, area| state.render(frame, area, true, &sel));
         let out = dump_buffer(&t);
         dump_to_file("search_empty", &format!("=== Search (empty) ===\n{out}"));
     }
@@ -351,9 +525,13 @@ mod tests {
         state.section = SearchSection::Tracks;
         state.tracks_state.select(Some(0));
 
-        let t = render(80, 30, |frame, area| state.render(frame, area, true));
+        let sel = Selection::default();
+        let t = render(80, 30, |frame, area| state.render(frame, area, true, &sel));
         let out = dump_buffer(&t);
-        dump_to_file("search_results", &format!("=== Search (results, tracks tab) ===\n{out}"));
+        dump_to_file(
+            "search_results",
+            &format!("=== Search (results, tracks tab) ===\n{out}"),
+        );
     }
 
     #[test]
@@ -366,9 +544,13 @@ mod tests {
         state.section = SearchSection::Albums;
         state.albums_state.select(Some(0));
 
-        let t = render(80, 30, |frame, area| state.render(frame, area, true));
+        let sel = Selection::default();
+        let t = render(80, 30, |frame, area| state.render(frame, area, true, &sel));
         let out = dump_buffer(&t);
-        dump_to_file("search_albums", &format!("=== Search (albums tab) ===\n{out}"));
+        dump_to_file(
+            "search_albums",
+            &format!("=== Search (albums tab) ===\n{out}"),
+        );
     }
 
     // ─── Scan ─────────────────────────────────────────────────────────────────
@@ -379,6 +561,9 @@ mod tests {
 
         let t = render(80, 20, |frame, area| state.render(frame, area));
         let out = dump_buffer(&t);
-        dump_to_file("scan_80x20", &format!("=== Scan (initial state) ===\n{out}"));
+        dump_to_file(
+            "scan_80x20",
+            &format!("=== Scan (initial state) ===\n{out}"),
+        );
     }
 }

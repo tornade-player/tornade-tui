@@ -8,8 +8,6 @@ pub static ACTIVE_IMAGE_THREADS: AtomicUsize = AtomicUsize::new(0);
 pub const MAX_IMAGE_THREADS: usize = 4;
 
 pub mod album_detail;
-#[cfg(test)]
-mod render_tests;
 pub mod albums;
 pub mod artist_detail;
 pub mod artists;
@@ -19,6 +17,8 @@ pub mod library;
 pub mod playlist_detail;
 pub mod playlists;
 pub mod queue;
+#[cfg(test)]
+mod render_tests;
 pub mod scan;
 pub mod search;
 

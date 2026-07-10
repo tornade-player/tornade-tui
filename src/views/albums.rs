@@ -1,7 +1,5 @@
 use crate::utils::truncate;
 use crate::views::{ACTIVE_IMAGE_THREADS, MAX_IMAGE_THREADS};
-use std::path::Path;
-use std::sync::atomic::Ordering;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -11,6 +9,8 @@ use ratatui::{
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tornade_core::{models::Album, services::LibraryService};
 
@@ -72,7 +72,6 @@ impl Default for AlbumsState {
         }
     }
 }
-
 
 impl AlbumsState {
     pub fn load(&mut self, library: &LibraryService) {
@@ -253,7 +252,8 @@ impl AlbumsState {
                 }
                 self.loading_ids.remove(id);
                 if let Some(img) = result {
-                    self.image_cache.insert(*id, picker.new_resize_protocol(img.clone()));
+                    self.image_cache
+                        .insert(*id, picker.new_resize_protocol(img.clone()));
                 } else {
                     self.failed_ids.insert(*id);
                 }

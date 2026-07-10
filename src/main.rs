@@ -11,13 +11,18 @@ use ratatui::crossterm::{
 use ratatui_image::picker::Picker;
 use tornade_core::{
     db,
-    services::{ArtworkService, LibraryService, PlayerService, PlaylistService, SearchService},
+    services::{
+        ArtworkService, LibraryService, MetadataEditService, PlayerService, PlaylistService,
+        SearchService,
+    },
     utils::AppPaths,
 };
 
 mod app;
+mod async_worker;
 mod commands;
 mod events;
+mod media_keys;
 mod navigation;
 mod player;
 mod tui_artwork;
@@ -41,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let player = PlayerService::new(pool.clone())?;
     let playlists = PlaylistService::new(pool.clone());
     let search_svc = SearchService::new(pool.clone());
+    let metadata_edit = MetadataEditService::new(pool.clone());
     let artwork = ArtworkService::new(pool.clone(), paths.clone());
 
     // Detect terminal image protocol before entering raw mode.
@@ -72,7 +78,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build application state
     let mut app = AppState::new(
-        player, library, playlists, search_svc, artwork, paths, picker, tui_target,
+        player,
+        library,
+        playlists,
+        search_svc,
+        metadata_edit,
+        artwork,
+        paths,
+        picker,
+        tui_target,
     );
 
     // Run event loop

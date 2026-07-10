@@ -229,6 +229,7 @@ impl QueueState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // render args are passed individually by design
     pub fn render(
         &mut self,
         frame: &mut Frame,
@@ -237,6 +238,7 @@ impl QueueState {
         active_index: usize,
         skipped_ids: &[i64],
         focused: bool,
+        selection: &crate::app::Selection,
     ) {
         let items: Vec<ListItem> = tracks
             .iter()
@@ -247,7 +249,11 @@ impl QueueState {
                 let dur = format_duration(t.duration.as_secs());
                 let artist = t.artist_names.first().cloned().unwrap_or_default();
                 let indicator = if is_active { "▶ " } else { "  " };
-                let line = Line::from(vec![
+                let mut spans = Vec::new();
+                if let Some(marker) = crate::widgets::selection::marker_span(selection, t.id) {
+                    spans.push(marker);
+                }
+                spans.extend([
                     Span::styled(
                         format!("{:>3}. {}", i + 1, indicator),
                         Style::default().fg(if is_active {
@@ -263,6 +269,7 @@ impl QueueState {
                     ),
                     Span::styled(format!("{:>5}", dur), Style::default().fg(Color::DarkGray)),
                 ]);
+                let line = Line::from(spans);
                 let style = if is_skipped {
                     Style::default().fg(Color::Red)
                 } else if is_active {

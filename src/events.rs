@@ -307,6 +307,13 @@ pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
 // ── Normal mode ──────────────────────────────────────────────────────────────
 
 fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
+    // Tag editor overlay: while open, route ALL keys to the editor and do NOT
+    // let them fall through to global handlers.
+    if app.tag_editor.is_some() {
+        handle_tag_editor(app, key);
+        return false;
+    }
+
     if app.show_help {
         if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
             app.show_help = false;
@@ -564,12 +571,21 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         }
     }
 
+    // Esc first clears an active selection / exits selection mode (US2) instead
+    // of quitting or navigating back.
+    if key.code == KeyCode::Esc && (app.selection.selection_mode || app.selection.is_active()) {
+        app.selection.clear();
+        return false;
+    }
+
     match key.code {
         // ── Quit / back ──
         KeyCode::Char('q') | KeyCode::Esc => {
             if app.nav.is_root() {
                 return true;
             }
+            // Leaving a detail view clears any active selection (FR-016).
+            app.selection.clear();
             app.nav.pop();
         }
 
@@ -619,8 +635,20 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Enter: open detail or play ──
         KeyCode::Enter => handle_enter(app),
 
+        // ── Multi-select (US2) ──
+        // `v` toggles selection mode for the current track list.
+        KeyCode::Char('v') => toggle_selection_mode(app),
+
         // ── Playback ──
-        KeyCode::Char(' ') => toggle_playback(app),
+        // Space marks/unmarks the highlighted track while in selection mode;
+        // otherwise it toggles playback (existing binding).
+        KeyCode::Char(' ') => {
+            if app.selection.selection_mode {
+                app.toggle_selection_at_cursor();
+            } else {
+                toggle_playback(app);
+            }
+        }
         KeyCode::Char('n') => {
             let _ = app.player.next();
         }
@@ -658,7 +686,15 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         }
 
         // ── Queue operations ──
-        KeyCode::Char('a') => app.add_selected_to_queue(),
+        // In selection mode `a` selects all in the current list; otherwise it
+        // adds the highlighted track to the queue (existing binding).
+        KeyCode::Char('a') => {
+            if app.selection.selection_mode {
+                app.select_all_current();
+            } else {
+                app.add_selected_to_queue();
+            }
+        }
         KeyCode::Char('x') => handle_remove_selected(app),
         KeyCode::Char('X') => {
             app.confirm = Some(ConfirmCtx {
@@ -671,11 +707,29 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Char('K') => handle_move_up_item(app),
 
         // ── Playlist operations ──
+        // `A` opens the playlist selector for the current selection (US2) or the
+        // highlighted track when no selection is active.
         KeyCode::Char('A') => show_playlist_selector(app),
-        KeyCode::Char('c') => handle_create_playlist(app),
+        // `D` (shift-d) removes the selected tracks from the current playlist.
+        KeyCode::Char('D') => app.remove_selection_from_playlist(),
+        // In selection mode `c` clears the selection; otherwise it creates a
+        // playlist (existing binding, only active in the Playlists view).
+        KeyCode::Char('c') => {
+            if app.selection.selection_mode {
+                app.selection.clear();
+            } else {
+                handle_create_playlist(app);
+            }
+        }
         KeyCode::Char('r') => handle_rename_playlist(app),
         KeyCode::Char('d') => handle_delete_playlist(app),
         KeyCode::Char('i') => handle_import_m3u(app),
+
+        // ── Tag editor ──
+        // `e` opens the tag editor for the highlighted track (single-track).
+        // TODO(US2): when multi-selection lands, `e` on an active selection
+        // should open the editor in album-level (multi-track) mode.
+        KeyCode::Char('e') => app.open_tag_editor(),
 
         // ── Library ──
         KeyCode::Char('s') => {
@@ -1032,8 +1086,31 @@ fn reload_playlist_detail(app: &mut AppState, playlist_id: i64) {
 
 // ── Playlist management ──────────────────────────────────────────────────────
 
+/// Toggle multi-select mode. Turning it off clears the current selection.
+fn toggle_selection_mode(app: &mut AppState) {
+    if app.selection.selection_mode {
+        app.selection.clear();
+    } else {
+        // Only enable selection mode in views that expose a track list.
+        if app.current_visible_track_ids().is_empty()
+            && !matches!(app.nav.current(), View::Search(_))
+        {
+            return;
+        }
+        app.selection.selection_mode = true;
+        app.selection.selected_ids.clear();
+        app.selection.anchor = app.selected_track_index();
+        app.set_status(
+            "Selection mode: Space marks, a all, A add, Esc exits",
+            StatusKind::Info,
+        );
+    }
+}
+
 fn show_playlist_selector(app: &mut AppState) {
-    if app.selected_track_id().is_some() {
+    // Open the selector when there is either an active multi-selection or a
+    // highlighted track.
+    if app.selection.is_active() || app.selected_track_id().is_some() {
         app.show_playlist_selector = true;
         app.playlist_selector_state = ratatui::widgets::ListState::default();
         // Pre-load playlists
@@ -1162,12 +1239,16 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Enter => {
             if let Some(idx) = app.playlist_selector_state.selected()
                 && let Some(pl) = playlists.get(idx)
-                && let Some(track_id) = app.selected_track_id()
             {
                 let pid = pl.id;
-                match app.playlists.add_tracks(pid, vec![track_id]) {
-                    Ok(_) => app.set_status("Added to playlist", StatusKind::Success),
-                    Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+                if app.selection.is_active() {
+                    // Bulk: add the whole selection with a duplicate-safe count.
+                    app.add_selection_to_playlist(pid);
+                } else if let Some(track_id) = app.selected_track_id() {
+                    match app.playlists.add_tracks(pid, vec![track_id]) {
+                        Ok(_) => app.set_status("Added to playlist", StatusKind::Success),
+                        Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+                    }
                 }
             }
             app.show_playlist_selector = false;
@@ -1175,6 +1256,38 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
         _ => {}
     }
     false
+}
+
+// ── Tag editor overlay ───────────────────────────────────────────────────────
+
+fn handle_tag_editor(app: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.tag_editor = None;
+        }
+        KeyCode::Enter => app.save_tag_editor(),
+        KeyCode::Tab | KeyCode::Down => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.focus_next();
+            }
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.focus_prev();
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.backspace();
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.push_char(c);
+            }
+        }
+        _ => {}
+    }
 }
 
 // ── Command mode ─────────────────────────────────────────────────────────────

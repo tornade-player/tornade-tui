@@ -44,16 +44,12 @@ fn resize_to_jpeg(src: &Path, dst: &Path, target: (u32, u32)) {
         return;
     }
     let Ok(img) = image::open(src) else { return };
-    let resized = img.resize_to_fill(
-        target.0,
-        target.1,
-        image::imageops::FilterType::Triangle,
-    );
-    let Ok(file) = std::fs::File::create(dst) else { return };
-    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-        BufWriter::new(file),
-        JPEG_QUALITY,
-    );
+    let resized = img.resize_to_fill(target.0, target.1, image::imageops::FilterType::Triangle);
+    let Ok(file) = std::fs::File::create(dst) else {
+        return;
+    };
+    let encoder =
+        image::codecs::jpeg::JpegEncoder::new_with_quality(BufWriter::new(file), JPEG_QUALITY);
     let _ = resized.write_with_encoder(encoder);
 }
 
@@ -116,18 +112,14 @@ mod tests {
 
     #[test]
     fn test_resolve_prefers_tui() {
-        let assets_dir =
-            std::path::PathBuf::from(env!("HOME")).join(".config/tornade/assets");
+        let assets_dir = std::path::PathBuf::from(env!("HOME")).join(".config/tornade/assets");
         let orig_dir = assets_dir.join("albums");
         // Use a generic tui dir for this test (any existing size subdir)
         let tui_base = assets_dir.join("tui/albums");
         let Ok(size_dirs) = std::fs::read_dir(&tui_base) else {
             return; // skip if no tui dirs exist
         };
-        let Some(size_dir) = size_dirs
-            .filter_map(|e| e.ok())
-            .find(|e| e.path().is_dir())
-        else {
+        let Some(size_dir) = size_dirs.filter_map(|e| e.ok()).find(|e| e.path().is_dir()) else {
             return;
         };
         let tui_dir = size_dir.path();

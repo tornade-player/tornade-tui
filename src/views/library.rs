@@ -1,4 +1,6 @@
+use crate::app::Selection;
 use crate::utils::{format_audio, format_duration, format_rating, truncate};
+use crate::widgets::selection::{count_span, marker_span};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -118,14 +120,20 @@ impl LibraryState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, selection: &Selection) {
         let chunks = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(0),
         ])
         .split(area);
-        render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
+        render_search_bar(
+            frame,
+            chunks[0],
+            &self.filter,
+            self.filter_active,
+            selection,
+        );
         self.list_area = Some(chunks[2]);
 
         if self.total_count == 0 && self.filter.is_empty() {
@@ -155,7 +163,11 @@ impl LibraryState {
                 let fmt = format_audio(t.file_type, t.sample_rate, t.bit_depth);
                 let rating = format_rating(t.rating.0);
                 let artist = t.artist_names.first().cloned().unwrap_or_default();
-                let line = Line::from(vec![
+                let mut spans = Vec::new();
+                if let Some(marker) = marker_span(selection, t.id) {
+                    spans.push(marker);
+                }
+                spans.extend([
                     Span::raw(format!("{:<40} ", truncate(&t.title, 39))),
                     Span::styled(
                         format!("{:<25} ", truncate(&artist, 24)),
@@ -168,6 +180,7 @@ impl LibraryState {
                     ),
                     Span::styled(rating, Style::default().fg(Color::Yellow)),
                 ]);
+                let line = Line::from(spans);
                 let style = if is_skipped {
                     Style::default().fg(Color::Red)
                 } else {
@@ -204,7 +217,13 @@ impl LibraryState {
     }
 }
 
-fn render_search_bar(frame: &mut Frame, area: Rect, filter: &str, active: bool) {
+fn render_search_bar(
+    frame: &mut Frame,
+    area: Rect,
+    filter: &str,
+    active: bool,
+    selection: &Selection,
+) {
     let cursor = if active { "_" } else { "" };
     let (text, style) = if filter.is_empty() && !active {
         (
@@ -222,8 +241,9 @@ fn render_search_bar(frame: &mut Frame, area: Rect, filter: &str, active: bool) 
     } else {
         Style::default()
     };
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, style))).style(bg),
-        area,
-    );
+    let mut spans = vec![Span::styled(text, style)];
+    if let Some(count) = count_span(selection) {
+        spans.push(count);
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(bg), area);
 }

@@ -23,7 +23,7 @@ impl PlaylistDetailState {
         let tracks: Vec<Track> = playlist
             .tracks
             .iter()
-            .filter_map(|&id| library.get_track(id).ok().flatten())
+            .filter_map(|pt| library.get_track(pt.track_id).ok().flatten())
             .collect();
         let mut list_state = ListState::default();
         if !tracks.is_empty() {
@@ -76,13 +76,19 @@ impl PlaylistDetailState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        selection: &crate::app::Selection,
+    ) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(0)])
             .split(area);
 
-        let header = Paragraph::new(Line::from(Span::styled(
+        let mut header_spans = vec![Span::styled(
             format!(
                 "{} · {} tracks",
                 truncate(&self.playlist.name, 40),
@@ -91,8 +97,11 @@ impl PlaylistDetailState {
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-        )))
-        .block(Block::default());
+        )];
+        if let Some(count) = crate::widgets::selection::count_span(selection) {
+            header_spans.push(count);
+        }
+        let header = Paragraph::new(Line::from(header_spans)).block(Block::default());
         frame.render_widget(header, chunks[0]);
 
         let items: Vec<ListItem> = self
@@ -104,7 +113,11 @@ impl PlaylistDetailState {
                 let dur = format_duration(t.duration.as_secs());
                 let artist = t.artist_names.first().cloned().unwrap_or_default();
                 let rating = format_rating(t.rating.0);
-                let line = Line::from(vec![
+                let mut spans = Vec::new();
+                if let Some(marker) = crate::widgets::selection::marker_span(selection, t.id) {
+                    spans.push(marker);
+                }
+                spans.extend([
                     Span::styled(
                         format!("{:>3}. ", pos + 1),
                         Style::default().fg(Color::DarkGray),
@@ -117,6 +130,7 @@ impl PlaylistDetailState {
                     Span::styled(format!("{:>5} ", dur), Style::default().fg(Color::DarkGray)),
                     Span::styled(rating, Style::default().fg(Color::Yellow)),
                 ]);
+                let line = Line::from(spans);
                 let style = if is_skipped {
                     Style::default().fg(Color::Red)
                 } else {

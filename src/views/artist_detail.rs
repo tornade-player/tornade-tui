@@ -28,7 +28,6 @@ pub struct ArtistDetailState {
     scrollbar_state: ScrollbarState,
 }
 
-
 impl ArtistDetailState {
     pub fn new(
         artist: Artist,
@@ -103,7 +102,13 @@ impl ArtistDetailState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, picker: &mut Picker) -> bool {
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        picker: &mut Picker,
+    ) -> bool {
         // Drain decoded image from background thread
         if self.image_loading && self.image_state.is_none() {
             if let Ok(mut guard) = self.pending_image.try_lock() {
@@ -173,7 +178,9 @@ impl ArtistDetailState {
 
             // Circle image - rendered directly, no border
             frame.render_stateful_widget(
-                StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(image::imageops::FilterType::Triangle))),
+                StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(
+                    image::imageops::FilterType::Triangle,
+                ))),
                 h_chunks[0],
                 protocol,
             );

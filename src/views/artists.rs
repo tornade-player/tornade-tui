@@ -1,7 +1,5 @@
 use crate::utils::truncate;
 use crate::views::{ACTIVE_IMAGE_THREADS, MAX_IMAGE_THREADS};
-use std::path::Path;
-use std::sync::atomic::Ordering;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -11,6 +9,8 @@ use ratatui::{
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tornade_core::models::Artist;
 use tornade_core::services::LibraryService;
@@ -72,7 +72,6 @@ impl Default for ArtistsState {
     }
 }
 
-
 impl ArtistsState {
     pub fn load(&mut self, library: &LibraryService) {
         self.artists = library.list_artists().unwrap_or_default();
@@ -102,7 +101,9 @@ impl ArtistsState {
     }
     pub fn move_down(&mut self) {
         let len = self.display_artists().len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         self.selected = (self.selected + self.cols).min(len - 1);
     }
     pub fn move_up(&mut self) {
@@ -110,7 +111,9 @@ impl ArtistsState {
     }
     pub fn page_down(&mut self) {
         let len = self.display_artists().len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         self.selected = (self.selected + self.cols * 3).min(len - 1);
     }
     pub fn page_up(&mut self) {
@@ -122,7 +125,9 @@ impl ArtistsState {
     }
     pub fn jump_bottom(&mut self) {
         let len = self.display_artists().len();
-        if len > 0 { self.selected = len - 1; }
+        if len > 0 {
+            self.selected = len - 1;
+        }
     }
 
     // Keep list_state in sync so existing event code using list_state still works
@@ -236,7 +241,11 @@ impl ArtistsState {
         }
 
         let has_pending = !self.loading_ids.is_empty()
-            || self.pending_decoded.try_lock().map(|g| !g.is_empty()).unwrap_or(true);
+            || self
+                .pending_decoded
+                .try_lock()
+                .map(|g| !g.is_empty())
+                .unwrap_or(true);
 
         let img_cols = self.img_cols;
         let cell_stride_w = self.cell_stride_w;
@@ -256,7 +265,12 @@ impl ArtistsState {
             }
             let w = img_cols.min(grid_area.x + grid_area.width - x);
             let h = (IMG_H + TEXT_PADDING + TEXT_H).min(grid_area.y + grid_area.height - y);
-            let cell_rect = Rect { x, y, width: w, height: h };
+            let cell_rect = Rect {
+                x,
+                y,
+                width: w,
+                height: h,
+            };
 
             let is_sel = *flat_idx == self.selected;
             let protocol = self.image_cache.get_mut(id);
@@ -291,12 +305,23 @@ fn render_cell(
 ) {
     let img_h = IMG_H.min(area.height);
     let img_w = img_cols.min(area.width);
-    let img_rect = Rect { width: img_w, height: img_h, ..area };
+    let img_rect = Rect {
+        width: img_w,
+        height: img_h,
+        ..area
+    };
 
     if let Some(proto) = protocol {
-        frame.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(Some(image::imageops::FilterType::Triangle))), img_rect, proto);
+        frame.render_stateful_widget(
+            StatefulImage::new().resize(Resize::Fit(Some(image::imageops::FilterType::Triangle))),
+            img_rect,
+            proto,
+        );
     } else {
-        frame.render_widget(Block::default().style(Style::default().bg(Color::Rgb(50, 50, 55))), img_rect);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(50, 50, 55))),
+            img_rect,
+        );
     }
 
     let text_y = area.y + img_h + TEXT_PADDING;
@@ -304,21 +329,29 @@ fn render_cell(
         return;
     }
     let text_h = area.height.saturating_sub(img_h + TEXT_PADDING);
-    let text_rect = Rect { y: text_y, height: text_h, width: img_w, x: area.x };
+    let text_rect = Rect {
+        y: text_y,
+        height: text_h,
+        width: img_w,
+        x: area.x,
+    };
     if text_rect.height == 0 {
         return;
     }
 
     let name_style = if is_selected && focused {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Gray)
     };
 
     frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(Span::styled(truncate(name, img_w as usize), name_style)),
-        ]),
+        Paragraph::new(vec![Line::from(Span::styled(
+            truncate(name, img_w as usize),
+            name_style,
+        ))]),
         text_rect,
     );
 }
@@ -326,10 +359,23 @@ fn render_cell(
 fn render_search_bar(frame: &mut Frame, area: Rect, filter: &str, active: bool) {
     let cursor = if active { "_" } else { "" };
     let (text, style) = if filter.is_empty() && !active {
-        ("\u{f002}  Search...".to_string(), Style::default().fg(Color::DarkGray))
+        (
+            "\u{f002}  Search...".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )
     } else {
-        (format!("\u{f002}  {}{}", filter, cursor), Style::default().fg(Color::White))
+        (
+            format!("\u{f002}  {}{}", filter, cursor),
+            Style::default().fg(Color::White),
+        )
     };
-    let bg = if active { Style::default().bg(Color::Rgb(40, 42, 54)) } else { Style::default() };
-    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))).style(bg), area);
+    let bg = if active {
+        Style::default().bg(Color::Rgb(40, 42, 54))
+    } else {
+        Style::default()
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text, style))).style(bg),
+        area,
+    );
 }

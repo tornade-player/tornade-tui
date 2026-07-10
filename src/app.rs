@@ -7,14 +7,16 @@ use crate::{
         QueueState, SearchState, SidebarEntry, View,
     },
     widgets::player_bar::PlayerHitZones,
+    widgets::tag_editor::TagEditorState,
 };
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
+use std::collections::HashSet;
 use std::time::Instant;
 use tornade_core::{
     models::Track,
     services::{
-        ArtworkService, LibraryService, PlaybackState, PlayerService, PlaylistService,
-        SearchService,
+        ArtworkService, LibraryService, MetadataEditService, PlaybackState, PlayerService,
+        PlaylistService, SearchService,
     },
     utils::AppPaths,
 };
@@ -83,12 +85,54 @@ pub enum ConfirmAction {
     LibraryCleanup,
 }
 
+/// Multi-select state for the current track list (US2).
+///
+/// Selection applies to whichever track list is currently focused in the
+/// content panel. It is cleared whenever the user leaves the current view or
+/// the library reloads (FR-016).
+#[derive(Debug, Default, Clone)]
+pub struct Selection {
+    /// Whether selection mode is active (`v` toggles it).
+    pub selection_mode: bool,
+    /// Track IDs currently marked as selected.
+    pub selected_ids: HashSet<i64>,
+    /// Anchor row index for potential range operations.
+    pub anchor: Option<usize>,
+}
+
+impl Selection {
+    /// Clear all selected ids, the anchor, and exit selection mode.
+    pub fn clear(&mut self) {
+        self.selection_mode = false;
+        self.selected_ids.clear();
+        self.anchor = None;
+    }
+
+    /// Number of selected tracks.
+    pub fn count(&self) -> usize {
+        self.selected_ids.len()
+    }
+
+    /// True when a non-empty selection exists.
+    pub fn is_active(&self) -> bool {
+        !self.selected_ids.is_empty()
+    }
+
+    /// Toggle the membership of `id` in the selection.
+    pub fn toggle(&mut self, id: i64) {
+        if !self.selected_ids.remove(&id) {
+            self.selected_ids.insert(id);
+        }
+    }
+}
+
 pub struct AppState {
     // Core services
     pub player: PlayerService,
     pub library: LibraryService,
     pub playlists: PlaylistService,
     pub search_svc: SearchService,
+    pub metadata_edit: MetadataEditService,
     #[allow(dead_code)] // held to keep the service alive (background artwork downloads)
     pub artwork: ArtworkService,
     pub paths: AppPaths,
@@ -112,6 +156,8 @@ pub struct AppState {
     pub show_help: bool,
     pub show_playlist_selector: bool,
     pub playlist_selector_state: ratatui::widgets::ListState,
+    /// Tag editor overlay state; `Some` when the editor is open.
+    pub tag_editor: Option<TagEditorState>,
 
     // Panel focus
     pub focused_panel: FocusedPanel,
@@ -126,6 +172,9 @@ pub struct AppState {
 
     // Sidebar playlist cache: refreshed on tick, used for the Playlists section
     pub sidebar_playlists: Vec<(i64, String)>,
+
+    // Multi-select state for the current track list (US2)
+    pub selection: Selection,
 
     // Status bar
     pub status: Option<StatusMessage>,
@@ -158,11 +207,13 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)] // services are injected individually by design
     pub fn new(
         player: PlayerService,
         library: LibraryService,
         playlists: PlaylistService,
         search_svc: SearchService,
+        metadata_edit: MetadataEditService,
         artwork: ArtworkService,
         paths: AppPaths,
         picker: Picker,
@@ -173,6 +224,7 @@ impl AppState {
             library,
             playlists,
             search_svc,
+            metadata_edit,
             artwork,
             paths,
             picker,
@@ -187,12 +239,14 @@ impl AppState {
             show_help: false,
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
+            tag_editor: None,
             focused_panel: FocusedPanel::Content,
             sidebar_cursor: 0,
             right_panel_queue_state: ratatui::widgets::ListState::default(),
             cached_queue_tracks: Vec::new(),
             cached_queue_ids: Vec::new(),
             sidebar_playlists: Vec::new(),
+            selection: Selection::default(),
             status: None,
             has_pending_images: false,
             queue_filter: String::new(),
@@ -294,6 +348,7 @@ impl AppState {
 
     /// Navigate directly to a playlist by ID (for sidebar playlist clicks).
     pub fn navigate_to_playlist(&mut self, id: i64) {
+        self.selection.clear();
         if let Ok(Some(pl)) = self.playlists.get_playlist(id) {
             let view = View::PlaylistDetail(PlaylistDetailState::new(pl, &self.library));
             self.nav.replace_root(view);
@@ -383,6 +438,8 @@ impl AppState {
     }
 
     pub fn navigate_to(&mut self, entry: SidebarEntry) {
+        // Leaving the current view clears any active track selection (FR-016).
+        self.selection.clear();
         self.sidebar_entry = entry;
         let view = match entry {
             SidebarEntry::Tracks => View::Library(LibraryState::default()),
@@ -482,6 +539,101 @@ impl AppState {
         }
     }
 
+    /// Track IDs currently visible in the focused track list, in display order.
+    /// Returns an empty vec for views that are not track lists.
+    pub fn current_visible_track_ids(&self) -> Vec<i64> {
+        match self.nav.current() {
+            View::Library(s) => s.visible_track_ids(),
+            View::AlbumDetail(s) => s.visible_track_ids(),
+            View::GenreDetail(s) => s.visible_track_ids(),
+            View::PlaylistDetail(s) => s.visible_track_ids(),
+            View::Search(s) => s.selected_track().map(|t| t.id).into_iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Toggle selection membership for the highlighted track (selection mode only).
+    pub fn toggle_selection_at_cursor(&mut self) {
+        if !self.selection.selection_mode {
+            return;
+        }
+        if let Some(id) = self.selected_track_id() {
+            self.selection.toggle(id);
+        }
+    }
+
+    /// Select every track in the current list (enables selection mode).
+    pub fn select_all_current(&mut self) {
+        let ids = self.current_visible_track_ids();
+        if ids.is_empty() {
+            return;
+        }
+        self.selection.selection_mode = true;
+        self.selection.selected_ids = ids.into_iter().collect();
+    }
+
+    /// Add the current selection to `playlist_id`, reporting the outcome via status.
+    pub fn add_selection_to_playlist(&mut self, playlist_id: i64) {
+        let ids: Vec<i64> = self.selection.selected_ids.iter().copied().collect();
+        if ids.is_empty() {
+            return;
+        }
+        match self.playlists.add_tracks(playlist_id, ids) {
+            Ok(result) => {
+                self.set_status(
+                    format!(
+                        "{} added, {} already present",
+                        result.added, result.already_present
+                    ),
+                    StatusKind::Success,
+                );
+                self.selection.clear();
+            }
+            Err(e) => self.set_status(format!("Error: {}", e), StatusKind::Error),
+        }
+    }
+
+    /// Remove the current selection from the playlist shown in the detail view.
+    pub fn remove_selection_from_playlist(&mut self) {
+        let playlist_id = match self.nav.current() {
+            View::PlaylistDetail(s) => s.playlist.id,
+            _ => return,
+        };
+        let ids: Vec<i64> = self.selection.selected_ids.iter().copied().collect();
+        if ids.is_empty() {
+            return;
+        }
+        match self.playlists.remove_tracks(playlist_id, &ids) {
+            Ok(count) => {
+                self.set_status(
+                    format!("Removed {count} track(s) from playlist"),
+                    StatusKind::Success,
+                );
+                self.selection.clear();
+                // Reload the playlist detail view so the change is reflected.
+                if let Ok(Some(pl)) = self.playlists.get_playlist(playlist_id)
+                    && let View::PlaylistDetail(s) = self.nav.current_mut()
+                {
+                    let sel = s.list_state.selected();
+                    *s = PlaylistDetailState::new(pl, &self.library);
+                    s.list_state.select(sel);
+                }
+            }
+            Err(e) => self.set_status(format!("Error: {}", e), StatusKind::Error),
+        }
+    }
+
+    /// Row index of the highlighted track in the current list view, if any.
+    pub fn selected_track_index(&self) -> Option<usize> {
+        match self.nav.current() {
+            View::Library(s) => s.list_state.selected(),
+            View::AlbumDetail(s) => s.list_state.selected(),
+            View::GenreDetail(s) => s.list_state.selected(),
+            View::PlaylistDetail(s) => s.list_state.selected(),
+            _ => None,
+        }
+    }
+
     pub fn selected_track_id(&self) -> Option<i64> {
         match self.nav.current() {
             View::Library(s) => s.selected_track().map(|t| t.id),
@@ -523,6 +675,133 @@ impl AppState {
                 Ok(_) => self.set_status("Added to queue", StatusKind::Success),
                 Err(e) => self.set_status(format!("Error: {}", e), StatusKind::Error),
             }
+        }
+    }
+
+    /// Open the tag editor for the current target(s).
+    ///
+    /// If a multi-selection is active, opens the editor in album-level
+    /// (multi-track) mode over the selected track IDs. Otherwise edits the
+    /// highlighted row (single-track).
+    pub fn open_tag_editor(&mut self) {
+        if self.selection.is_active() {
+            self.open_multi_tag_editor();
+            return;
+        }
+        let Some(track_id) = self.selected_track_id() else {
+            return;
+        };
+        match self.metadata_edit.current_track_update(track_id) {
+            Ok(current) => {
+                self.tag_editor = Some(crate::widgets::tag_editor::TagEditorState::single(
+                    track_id, current,
+                ));
+            }
+            Err(e) => self.set_status(format!("Cannot edit tags: {e}"), StatusKind::Error),
+        }
+    }
+
+    /// Open the multi-track tag editor over the active selection.
+    fn open_multi_tag_editor(&mut self) {
+        // Preserve display order of the current list for stable prefill baseline.
+        let ordered: Vec<i64> = self
+            .current_visible_track_ids()
+            .into_iter()
+            .filter(|id| self.selection.selected_ids.contains(id))
+            .collect();
+        let ids: Vec<i64> = if ordered.is_empty() {
+            self.selection.selected_ids.iter().copied().collect()
+        } else {
+            ordered
+        };
+        let mut currents = Vec::with_capacity(ids.len());
+        for &id in &ids {
+            match self.metadata_edit.current_track_update(id) {
+                Ok(current) => currents.push(current),
+                Err(e) => {
+                    self.set_status(format!("Cannot edit tags: {e}"), StatusKind::Error);
+                    return;
+                }
+            }
+        }
+        self.tag_editor = Some(crate::widgets::tag_editor::TagEditorState::multi(
+            ids, &currents,
+        ));
+    }
+
+    /// Persist the open tag editor and close it on success.
+    ///
+    /// Single target routes through `update_track`; multiple targets route
+    /// through `update_tracks` (album-level only). After a successful save the
+    /// current view is reloaded so the change appears without a rescan.
+    pub fn save_tag_editor(&mut self) {
+        let Some(editor) = self.tag_editor.as_ref() else {
+            return;
+        };
+        if !editor.is_valid() {
+            return; // save blocked while invalid (year field)
+        }
+
+        let targets = editor.targets.clone();
+        let update = editor.build_update();
+
+        let failed: Vec<i64> = if targets.len() == 1 {
+            match self.metadata_edit.update_track(targets[0], &update) {
+                Ok(r) if r.ok => Vec::new(),
+                Ok(r) => vec![r.track_id],
+                Err(e) => {
+                    self.set_status(format!("Save failed: {e}"), StatusKind::Error);
+                    return;
+                }
+            }
+        } else {
+            self.metadata_edit
+                .update_tracks(&targets, &update)
+                .into_iter()
+                .filter(|r| !r.ok)
+                .map(|r| r.track_id)
+                .collect()
+        };
+
+        if failed.is_empty() {
+            self.tag_editor = None;
+            self.set_status("Tags saved", StatusKind::Success);
+            self.reload_current_view_tracks();
+        } else {
+            let ids = failed
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.set_status(format!("Failed to save track(s): {ids}"), StatusKind::Error);
+        }
+    }
+
+    /// Reload the current view's track data from the library so tag edits are
+    /// reflected without a full rescan. Covers both the root list views and the
+    /// pushed detail views.
+    fn reload_current_view_tracks(&mut self) {
+        match self.nav.current_mut() {
+            View::Library(s) => s.load(&self.library),
+            View::Albums(s) => s.load(&self.library),
+            View::Artists(s) => s.load(&self.library),
+            View::Genres(s) => s.load(&self.library),
+            View::AlbumDetail(s) => s.reload(&self.library),
+            View::GenreDetail(s) => s.reload(&self.library),
+            View::PlaylistDetail(_) => {
+                let pid = match self.nav.current() {
+                    View::PlaylistDetail(s) => s.playlist.id,
+                    _ => return,
+                };
+                if let Ok(Some(pl)) = self.playlists.get_playlist(pid)
+                    && let View::PlaylistDetail(s) = self.nav.current_mut()
+                {
+                    let sel = s.list_state.selected();
+                    *s = PlaylistDetailState::new(pl, &self.library);
+                    s.list_state.select(sel);
+                }
+            }
+            _ => {}
         }
     }
 
