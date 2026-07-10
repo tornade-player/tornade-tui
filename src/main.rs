@@ -90,8 +90,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tui_target,
     );
 
+    // Hardware media keys (macOS/Windows/Linux). Optional: `None` if the OS
+    // denies or does not support application media controls (FR-026).
+    let (media_tx, media_rx) = std::sync::mpsc::channel();
+    let media_handle = media_keys::init(media_tx);
+
     // Run event loop
-    let result = run_loop(&mut terminal, &mut app);
+    let result = run_loop(&mut terminal, &mut app, media_rx, media_handle);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -112,12 +117,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut AppState,
+    media_rx: std::sync::mpsc::Receiver<media_keys::MediaKeyEvent>,
+    mut media_handle: Option<media_keys::MediaKeyHandle>,
 ) -> io::Result<()> {
     use std::time::Instant;
 
     let tick_rate = Duration::from_millis(500);
     let mut last_tick = Instant::now();
     let mut needs_redraw = true;
+    let mut toggle_debounce = media_keys::Debouncer::new(media_keys::TOGGLE_DEBOUNCE);
+    // Last (track_id, is_playing) published to the OS now-playing surface.
+    let mut prev_now_playing: Option<(i64, bool)> = None;
 
     loop {
         if needs_redraw {
@@ -172,11 +182,54 @@ fn run_loop(
             needs_redraw = true;
         }
 
+        // Drain hardware media-key events (FR-024). Toggle is debounced so a
+        // single press cannot double play/pause (FR-027).
+        while let Ok(ev) = media_rx.try_recv() {
+            if matches!(ev, media_keys::MediaKeyEvent::Toggle)
+                && !toggle_debounce.accept(Instant::now())
+            {
+                continue;
+            }
+            events::handle_media_key(app, ev);
+            needs_redraw = true;
+        }
+
         if last_tick.elapsed() >= tick_rate {
             if app.tick() {
                 needs_redraw = true;
             }
             last_tick = Instant::now();
+        }
+
+        // Publish now-playing state to the OS when the track or play state
+        // changes (FR-027a). No-op when media controls are unavailable.
+        if let Some(handle) = media_handle.as_mut() {
+            let playing = matches!(
+                app.player_cache.state,
+                tornade_core::services::PlaybackState::Playing
+            );
+            let current = app
+                .player_cache
+                .current_track
+                .as_ref()
+                .map(|t| (t.id, playing));
+            if current != prev_now_playing {
+                if let Some(track) = app.player_cache.current_track.as_ref() {
+                    handle.update_now_playing(
+                        &track.title,
+                        track.artist_names.first().map(String::as_str),
+                        None,
+                        Some(track.duration),
+                    );
+                    handle.set_playback(
+                        playing,
+                        Duration::from_secs_f64(app.player_cache.position.max(0.0)),
+                    );
+                } else {
+                    handle.set_stopped();
+                }
+                prev_now_playing = current;
+            }
         }
     }
 }

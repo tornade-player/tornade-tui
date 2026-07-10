@@ -775,6 +775,31 @@ fn toggle_playback(app: &mut AppState) {
     }
 }
 
+/// Apply a hardware media-key event, reusing the same playback paths as the
+/// keyboard controls (feature 012, User Story 4).
+pub fn handle_media_key(app: &mut AppState, event: crate::media_keys::MediaKeyEvent) {
+    use crate::media_keys::MediaKeyEvent;
+    match event {
+        MediaKeyEvent::Toggle => toggle_playback(app),
+        MediaKeyEvent::Play => match app.player_cache.state {
+            PlaybackState::Paused => {
+                let _ = app.player.resume();
+            }
+            PlaybackState::Stopped => app.play_from_current_view(),
+            PlaybackState::Playing => {}
+        },
+        MediaKeyEvent::Pause => {
+            let _ = app.player.pause();
+        }
+        MediaKeyEvent::Next => {
+            let _ = app.player.next();
+        }
+        MediaKeyEvent::Previous => {
+            let _ = app.player.previous();
+        }
+    }
+}
+
 fn handle_enter(app: &mut AppState) {
     match app.nav.current() {
         View::Library(_)
