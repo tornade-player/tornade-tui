@@ -17,6 +17,45 @@ use tornade_core::services::LibraryService;
 #[allow(dead_code)] // reserved for pagination when library is large
 const PAGE_SIZE: usize = 50;
 
+/// Sort key for the library track list.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum SortKey {
+    #[default]
+    None,
+    Title,
+    Artist,
+    Duration,
+    Rating,
+    Plays,
+    LastPlayed,
+}
+
+impl SortKey {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "title" => Some(Self::Title),
+            "artist" => Some(Self::Artist),
+            "duration" | "time" => Some(Self::Duration),
+            "rating" => Some(Self::Rating),
+            "plays" | "playcount" => Some(Self::Plays),
+            "lastplayed" | "last" => Some(Self::LastPlayed),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Title => "title",
+            Self::Artist => "artist",
+            Self::Duration => "duration",
+            Self::Rating => "rating",
+            Self::Plays => "plays",
+            Self::LastPlayed => "last played",
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct LibraryState {
     /// Full unfiltered library (loaded on init / reload).
@@ -28,6 +67,8 @@ pub struct LibraryState {
     pub filter: String,
     pub filter_active: bool,
     pub skipped_ids: Vec<i64>,
+    pub sort_key: SortKey,
+    pub sort_desc: bool,
     scrollbar_state: ScrollbarState,
     /// Area of the track list (set each frame during render, used for mouse hit detection).
     pub list_area: Option<Rect>,
@@ -43,8 +84,49 @@ impl LibraryState {
             .flat_map(|s| library.get_source_tracks(s.id).unwrap_or_default())
             .collect();
         self.total_count = self.tracks.len() as i64;
+        self.apply_sort();
         if self.list_state.selected().is_none() && !self.tracks.is_empty() {
             self.list_state.select(Some(0));
+        }
+    }
+
+    /// Set the sort key. Selecting the current key again flips the direction.
+    pub fn set_sort(&mut self, key: SortKey) {
+        if self.sort_key == key {
+            self.sort_desc = !self.sort_desc;
+        } else {
+            self.sort_key = key;
+            self.sort_desc = false;
+        }
+        self.apply_sort();
+    }
+
+    /// Sort the loaded tracks (and any active search results) in place.
+    fn apply_sort(&mut self) {
+        let key = self.sort_key;
+        let desc = self.sort_desc;
+        if key == SortKey::None {
+            return;
+        }
+        let cmp = move |a: &Track, b: &Track| {
+            let o = match key {
+                SortKey::None => std::cmp::Ordering::Equal,
+                SortKey::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
+                SortKey::Artist => {
+                    let an = a.artist_names.first().map(|s| s.to_lowercase()).unwrap_or_default();
+                    let bn = b.artist_names.first().map(|s| s.to_lowercase()).unwrap_or_default();
+                    an.cmp(&bn)
+                }
+                SortKey::Duration => a.duration.cmp(&b.duration),
+                SortKey::Rating => a.rating.0.cmp(&b.rating.0),
+                SortKey::Plays => a.play_count.cmp(&b.play_count),
+                SortKey::LastPlayed => a.last_played_at.cmp(&b.last_played_at),
+            };
+            if desc { o.reverse() } else { o }
+        };
+        self.tracks.sort_by(&cmp);
+        if let Some(sr) = self.search_results.as_mut() {
+            sr.sort_by(&cmp);
         }
     }
 

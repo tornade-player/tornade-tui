@@ -20,6 +20,7 @@ pub enum Command {
     Export { path: PathBuf },
     GoToArtist,
     Stats,
+    Sort { field: String },
     Seek { position_str: String },
     Help,
     Navigate(SidebarEntry),
@@ -120,6 +121,17 @@ impl Command {
             }
             "artist" => Self::GoToArtist,
             "stats" => Self::Stats,
+            "sort" => {
+                if rest.is_empty() {
+                    Self::Unknown(
+                        "sort <title|artist|duration|rating|plays|lastplayed>".to_string(),
+                    )
+                } else {
+                    Self::Sort {
+                        field: rest.to_string(),
+                    }
+                }
+            }
             "seek" => {
                 if rest.is_empty() {
                     Self::Unknown("seek requires a position: :seek <mm:ss>".to_string())
@@ -275,6 +287,17 @@ mod tests {
     #[test]
     fn parse_stats() {
         assert_eq!(Command::parse("stats"), Command::Stats);
+    }
+
+    #[test]
+    fn parse_sort() {
+        assert_eq!(
+            Command::parse("sort artist"),
+            Command::Sort {
+                field: "artist".to_string()
+            }
+        );
+        assert!(matches!(Command::parse("sort"), Command::Unknown(_)));
     }
 
     #[test]

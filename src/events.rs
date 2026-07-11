@@ -1626,6 +1626,25 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::Export { path } => app.export_current_playlist(path),
         Command::GoToArtist => open_current_track_artist(app),
         Command::Stats => app.compute_stats(),
+        Command::Sort { field } => {
+            use crate::views::library::SortKey;
+            match SortKey::from_str(&field) {
+                Some(key) => {
+                    let sorted = if let View::Library(s) = app.nav.current_mut() {
+                        s.set_sort(key);
+                        true
+                    } else {
+                        false
+                    };
+                    if sorted {
+                        app.set_status(format!("Sorted by {}", key.label()), StatusKind::Success);
+                    } else {
+                        app.set_status("Sort works in the Tracks view", StatusKind::Error);
+                    }
+                }
+                None => app.set_status(format!("Unknown sort field: {field}"), StatusKind::Error),
+            }
+        }
         Command::Help => app.show_help = true,
         Command::Navigate(entry) => app.navigate_to(entry),
         Command::Unknown(msg) => {
