@@ -160,6 +160,7 @@ impl AlbumsState {
         focused: bool,
         picker: &mut Picker,
         tui_dir: &Path,
+        artwork: bool,
     ) -> bool {
         let chunks = Layout::vertical([
             Constraint::Length(1),
@@ -264,42 +265,47 @@ impl AlbumsState {
 
         // 2. Spawn background threads for visible images not yet in cache or loading.
         //    Thumbnails are pre-sized at target resolution, just load from disk.
-        for (_, id, _, _, _, online, local) in &visible {
-            if ACTIVE_IMAGE_THREADS.load(Ordering::Relaxed) >= MAX_IMAGE_THREADS {
-                break;
-            }
-            if self.image_cache.contains_key(id)
-                || self.loading_ids.contains(id)
-                || self.failed_ids.contains(id)
-            {
-                continue;
-            }
-            let path = online
-                .as_ref()
-                .map(|p| crate::tui_artwork::resolve_artwork_path(p, tui_dir))
-                .or_else(|| local.as_ref().cloned());
-            if let Some(path) = path {
-                self.loading_ids.insert(*id);
-                ACTIVE_IMAGE_THREADS.fetch_add(1, Ordering::Relaxed);
-                let id = *id;
-                let pending = Arc::clone(&self.pending_decoded);
-                std::thread::spawn(move || {
-                    let result = image::open(&path).ok();
-                    if let Ok(mut guard) = pending.lock() {
-                        guard.push((id, result));
-                    }
-                    ACTIVE_IMAGE_THREADS.fetch_sub(1, Ordering::Relaxed);
-                });
+        //    Skipped entirely in text-only mode (`:artwork off`).
+        if artwork {
+            for (_, id, _, _, _, online, local) in &visible {
+                if ACTIVE_IMAGE_THREADS.load(Ordering::Relaxed) >= MAX_IMAGE_THREADS {
+                    break;
+                }
+                if self.image_cache.contains_key(id)
+                    || self.loading_ids.contains(id)
+                    || self.failed_ids.contains(id)
+                {
+                    continue;
+                }
+                let path = online
+                    .as_ref()
+                    .map(|p| crate::tui_artwork::resolve_artwork_path(p, tui_dir))
+                    .or_else(|| local.as_ref().cloned());
+                if let Some(path) = path {
+                    self.loading_ids.insert(*id);
+                    ACTIVE_IMAGE_THREADS.fetch_add(1, Ordering::Relaxed);
+                    let id = *id;
+                    let pending = Arc::clone(&self.pending_decoded);
+                    std::thread::spawn(move || {
+                        let result = image::open(&path).ok();
+                        if let Ok(mut guard) = pending.lock() {
+                            guard.push((id, result));
+                        }
+                        ACTIVE_IMAGE_THREADS.fetch_sub(1, Ordering::Relaxed);
+                    });
+                }
             }
         }
 
-        // Whether any images are still pending (loading or waiting to be encoded)
-        let has_pending = !self.loading_ids.is_empty()
-            || self
-                .pending_decoded
-                .try_lock()
-                .map(|g| !g.is_empty())
-                .unwrap_or(true);
+        // Whether any images are still pending (loading or waiting to be encoded).
+        // Always false in text-only mode so the redraw loop stays at idle cadence.
+        let has_pending = artwork
+            && (!self.loading_ids.is_empty()
+                || self
+                    .pending_decoded
+                    .try_lock()
+                    .map(|g| !g.is_empty())
+                    .unwrap_or(true));
 
         let img_cols = self.img_cols;
         let cell_stride_w = self.cell_stride_w;
@@ -329,7 +335,11 @@ impl AlbumsState {
             };
 
             let is_sel = *flat_idx == self.selected;
-            let protocol = self.image_cache.get_mut(id);
+            let protocol = if artwork {
+                self.image_cache.get_mut(id)
+            } else {
+                None
+            };
             render_cell(
                 frame, cell_rect, title, artist, *year, is_sel, focused, protocol, img_cols,
             );

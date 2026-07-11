@@ -103,6 +103,7 @@ pub fn render(frame: &mut Frame) {
                 (":stats", "Show library statistics"),
                 (":prefs", "Show preferences / configuration"),
                 (":fetchart", "Fetch missing artwork from MusicBrainz"),
+                (":artwork on|off", "Toggle album/artist artwork (perf)"),
                 (":source add <path>", "Add & scan a library source"),
                 (":source remove <id>", "Remove a library source (see :prefs)"),
                 (":refresh", "Reload the current view from the database"),

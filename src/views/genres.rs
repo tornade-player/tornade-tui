@@ -136,6 +136,7 @@ impl GenresState {
         focused: bool,
         picker: &mut Picker,
         tui_dir: &std::path::Path,
+        artwork: bool,
     ) -> bool {
         let chunks = Layout::vertical([
             Constraint::Length(1),
@@ -152,7 +153,7 @@ impl GenresState {
         let has_photos = self.artwork_paths.iter().any(|p| !p.is_empty());
         let has_filter = !self.filter.is_empty();
 
-        let has_pending = if has_photos && !has_filter && IMG_WIDTH + 2 < area.width {
+        let has_pending = if artwork && has_photos && !has_filter && IMG_WIDTH + 2 < area.width {
             let orig_indices: Vec<usize> = filtered
                 .iter()
                 .filter_map(|fg| self.genres.iter().position(|(g, _, _)| g.id == fg.0.id))

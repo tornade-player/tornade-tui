@@ -352,7 +352,7 @@ mod tests {
         let mut picker = Picker::halfblocks();
 
         let t = render(80, 30, |frame, area| {
-            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"), true);
         });
         let out = dump_buffer(&t);
         dump_to_file(
@@ -369,7 +369,7 @@ mod tests {
         let mut picker = Picker::halfblocks();
 
         let t = render(80, 30, |frame, area| {
-            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"), true);
         });
         let out = dump_buffer(&t);
         dump_to_file(
@@ -387,7 +387,7 @@ mod tests {
         let mut picker = Picker::halfblocks();
 
         let t = render(80, 30, |frame, area| {
-            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"), true);
         });
         let out = dump_buffer(&t);
         dump_to_file(
@@ -404,7 +404,7 @@ mod tests {
         let mut picker = Picker::halfblocks();
 
         let t = render(80, 30, |frame, area| {
-            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"), true);
         });
         let out = dump_buffer(&t);
         dump_to_file(
@@ -422,7 +422,7 @@ mod tests {
         let mut picker = Picker::halfblocks();
 
         let t = render(80, 30, |frame, area| {
-            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"), true);
         });
         let out = dump_buffer(&t);
         dump_to_file(
@@ -440,7 +440,7 @@ mod tests {
         let mut picker = Picker::halfblocks();
 
         let t = render(80, 30, |frame, area| {
-            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"), true);
         });
         let out = dump_buffer(&t);
         dump_to_file(
@@ -458,7 +458,7 @@ mod tests {
         let mut picker = Picker::halfblocks();
 
         let t = render(80, 30, |frame, area| {
-            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"));
+            state.render(frame, area, true, &mut picker, std::path::Path::new("/tmp"), true);
         });
         let out = dump_buffer(&t);
         dump_to_file(

@@ -23,6 +23,7 @@ pub enum Command {
     Stats,
     Prefs,
     FetchArtwork,
+    ArtworkToggle { mode: String },
     SourceAdd { path: PathBuf },
     SourceRemove { id: i64 },
     Sort { field: String },
@@ -127,7 +128,10 @@ impl Command {
             "artist" => Self::GoToArtist,
             "refresh" => Self::Refresh,
             "stats" => Self::Stats,
-            "fetchart" | "artwork" => Self::FetchArtwork,
+            "fetchart" => Self::FetchArtwork,
+            "artwork" => Self::ArtworkToggle {
+                mode: rest.to_lowercase(),
+            },
             "source" => {
                 let (subcmd, arg) = rest.split_once(' ').unwrap_or((rest, ""));
                 match subcmd.to_lowercase().as_str() {

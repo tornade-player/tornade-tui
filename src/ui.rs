@@ -108,7 +108,11 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         frame,
         right_chunks[3],
         &app.player_cache,
-        app.player_artwork.as_mut(),
+        if app.artwork_enabled {
+            app.player_artwork.as_mut()
+        } else {
+            None
+        },
         album_name,
     );
 
@@ -122,14 +126,17 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
     let tui_album_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
     let tui_artist_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
     let selection = app.selection.clone();
+    let artwork = app.artwork_enabled;
     match app.nav.current_mut() {
         View::Library(s) => {
             s.render(frame, area, focused, &selection);
             false
         }
-        View::Albums(s) => s.render(frame, area, focused, &mut app.picker, &tui_album_dir),
-        View::Artists(s) => s.render(frame, area, focused, &mut app.picker, &tui_artist_dir),
-        View::Genres(s) => s.render(frame, area, focused, &mut app.picker, &tui_album_dir),
+        View::Albums(s) => s.render(frame, area, focused, &mut app.picker, &tui_album_dir, artwork),
+        View::Artists(s) => {
+            s.render(frame, area, focused, &mut app.picker, &tui_artist_dir, artwork)
+        }
+        View::Genres(s) => s.render(frame, area, focused, &mut app.picker, &tui_album_dir, artwork),
         View::Playlists(s) => {
             s.render(frame, area, focused);
             false
@@ -138,7 +145,7 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
             s.render(frame, area, focused, &selection);
             false
         }
-        View::ArtistDetail(s) => s.render(frame, area, focused, &mut app.picker),
+        View::ArtistDetail(s) => s.render(frame, area, focused, &mut app.picker, artwork),
         View::GenreDetail(s) => {
             s.render(frame, area, focused, &selection);
             false

@@ -172,6 +172,9 @@ pub struct AppState {
     pub show_prefs: bool,
     pub prefs_lines: Vec<(String, String)>,
     pub artwork_fetching: bool,
+    /// When false, album/artist artwork is not rendered (text-only mode) to
+    /// eliminate the per-frame image-emission cost. Toggled with `:artwork`.
+    pub artwork_enabled: bool,
     pub show_playlist_selector: bool,
     pub playlist_selector_state: ratatui::widgets::ListState,
     /// Tag editor overlay state; `Some` when the editor is open.
@@ -268,6 +271,7 @@ impl AppState {
             show_prefs: false,
             prefs_lines: Vec::new(),
             artwork_fetching: false,
+            artwork_enabled: true,
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
             tag_editor: None,

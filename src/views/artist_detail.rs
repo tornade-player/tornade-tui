@@ -111,9 +111,10 @@ impl ArtistDetailState {
         area: Rect,
         focused: bool,
         picker: &mut Picker,
+        artwork: bool,
     ) -> bool {
-        // Drain decoded image from background thread
-        if self.image_loading && self.image_state.is_none() {
+        // Drain decoded image from background thread (skipped in text-only mode).
+        if artwork && self.image_loading && self.image_state.is_none() {
             if let Ok(mut guard) = self.pending_image.try_lock() {
                 if let Some(img) = guard.take() {
                     let rgba = image::DynamicImage::ImageRgba8(img.to_rgba8());
@@ -123,9 +124,10 @@ impl ArtistDetailState {
             }
         }
 
-        let has_pending = self.image_loading;
+        let has_pending = artwork && self.image_loading;
 
-        let header_height = if self.image_state.is_some() { 10 } else { 4 };
+        let show_image = artwork && self.image_state.is_some();
+        let header_height = if show_image { 10 } else { 4 };
         let related_height: u16 = if self.related.is_empty() { 0 } else { 2 };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -136,7 +138,7 @@ impl ArtistDetailState {
             ])
             .split(area);
 
-        self.render_header(frame, chunks[0]);
+        self.render_header(frame, chunks[0], show_image);
 
         // Related artists (same-genre) footer.
         if related_height > 0 {
@@ -211,8 +213,8 @@ impl ArtistDetailState {
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
-    fn render_header(&mut self, frame: &mut Frame, area: Rect) {
-        if let Some(ref mut protocol) = self.image_state {
+    fn render_header(&mut self, frame: &mut Frame, area: Rect, show_image: bool) {
+        if let Some(protocol) = self.image_state.as_mut().filter(|_| show_image) {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(20), Constraint::Min(0)])

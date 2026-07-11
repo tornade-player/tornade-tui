@@ -1633,6 +1633,15 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::Stats => app.compute_stats(),
         Command::Prefs => app.compute_prefs(),
         Command::FetchArtwork => app.start_artwork_fetch(),
+        Command::ArtworkToggle { mode } => {
+            app.artwork_enabled = match mode.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => !app.artwork_enabled,
+            };
+            let state = if app.artwork_enabled { "on" } else { "off" };
+            app.set_status(format!("Artwork {state}"), StatusKind::Success);
+        }
         Command::SourceAdd { path } => start_scan(app, path),
         Command::SourceRemove { id } => app.remove_source(id),
         Command::Refresh => {

@@ -136,10 +136,12 @@ fn run_loop(
         }
 
         // Poll only for the time remaining until next tick.
-        // Use a short timeout while background image loads are in progress so we
-        // redraw quickly as each image becomes ready.
+        // While background image loads are in progress, redraw at a bounded
+        // ~10 fps so newly decoded images appear promptly without pinning a CPU
+        // core (a tighter interval re-emits every visible image each frame,
+        // which is expensive — especially with the halfblocks protocol).
         let timeout = if app.has_pending_images {
-            Duration::from_millis(30)
+            Duration::from_millis(100)
         } else {
             tick_rate.saturating_sub(last_tick.elapsed())
         };
