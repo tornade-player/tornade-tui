@@ -301,6 +301,15 @@ impl AppState {
 
         self.player_cache.poll(&self.player);
 
+        // Auto-advance: when the current track finishes naturally, move to the
+        // next one. `is_track_finished` only returns true while playing and past
+        // the end, and suppresses itself while a new track is loading, so this
+        // cannot double-skip. Mirrors the macOS GUI behaviour.
+        if self.player.is_track_finished() {
+            let _ = self.player.next();
+            self.player_cache.poll(&self.player);
+        }
+
         let status_cleared = if self
             .status
             .as_ref()
