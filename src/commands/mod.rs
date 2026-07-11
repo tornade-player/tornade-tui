@@ -22,6 +22,9 @@ pub enum Command {
     Refresh,
     Stats,
     Prefs,
+    FetchArtwork,
+    SourceAdd { path: PathBuf },
+    SourceRemove { id: i64 },
     Sort { field: String },
     Seek { position_str: String },
     Help,
@@ -124,6 +127,20 @@ impl Command {
             "artist" => Self::GoToArtist,
             "refresh" => Self::Refresh,
             "stats" => Self::Stats,
+            "fetchart" | "artwork" => Self::FetchArtwork,
+            "source" => {
+                let (subcmd, arg) = rest.split_once(' ').unwrap_or((rest, ""));
+                match subcmd.to_lowercase().as_str() {
+                    "add" if !arg.is_empty() => Self::SourceAdd {
+                        path: expand_tilde(arg),
+                    },
+                    "remove" | "rm" => match arg.trim().parse::<i64>() {
+                        Ok(id) => Self::SourceRemove { id },
+                        _ => Self::Unknown("source remove needs an id: :source remove <id>".to_string()),
+                    },
+                    _ => Self::Unknown("usage: :source add <path> | :source remove <id>".to_string()),
+                }
+            }
             "prefs" | "preferences" | "settings" => Self::Prefs,
             "sort" => {
                 if rest.is_empty() {

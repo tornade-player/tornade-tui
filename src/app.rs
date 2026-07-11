@@ -171,6 +171,7 @@ pub struct AppState {
     pub stats_lines: Vec<(String, String)>,
     pub show_prefs: bool,
     pub prefs_lines: Vec<(String, String)>,
+    pub artwork_fetching: bool,
     pub show_playlist_selector: bool,
     pub playlist_selector_state: ratatui::widgets::ListState,
     /// Tag editor overlay state; `Some` when the editor is open.
@@ -266,6 +267,7 @@ impl AppState {
             stats_lines: Vec::new(),
             show_prefs: false,
             prefs_lines: Vec::new(),
+            artwork_fetching: false,
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
             tag_editor: None,
@@ -318,6 +320,8 @@ impl AppState {
             self.player_cache.poll(&self.player);
         }
 
+        let artwork_changed = self.poll_artwork_fetch();
+
         let status_cleared = if self
             .status
             .as_ref()
@@ -346,6 +350,7 @@ impl AppState {
             || old_track != new_track
             || old_queue_len != new_queue_len
             || status_cleared
+            || artwork_changed
             || (had_status && self.status.is_none())
     }
 
@@ -804,6 +809,18 @@ impl AppState {
         self.show_stats = true;
     }
 
+    /// Remove a library source (and its tracks) by id (`:source remove <id>`).
+    pub fn remove_source(&mut self, id: i64) {
+        match self.library.remove_source(id) {
+            Ok(n) if n > 0 => {
+                self.set_status(format!("Removed source #{id}"), StatusKind::Success);
+                self.reload_current_view();
+            }
+            Ok(_) => self.set_status(format!("No source with id {id}"), StatusKind::Error),
+            Err(e) => self.set_status(format!("Error: {e}"), StatusKind::Error),
+        }
+    }
+
     /// Build the preferences/configuration overlay (`:prefs`).
     pub fn compute_prefs(&mut self) {
         let mut lines = vec![
@@ -821,11 +838,56 @@ impl AppState {
                     .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default();
-                lines.push((format!("  {}", s.name), path));
+                lines.push((format!("  #{} {}", s.id, s.name), path));
             }
         }
         self.prefs_lines = lines;
         self.show_prefs = true;
+    }
+
+    /// Kick off a background bulk artwork fetch (albums + artists) from
+    /// MusicBrainz / Cover Art Archive. Progress is polled in `tick`.
+    pub fn start_artwork_fetch(&mut self) {
+        if self.artwork_fetching {
+            self.set_status("Artwork fetch already running", StatusKind::Info);
+            return;
+        }
+        self.artwork_fetching = true;
+        let svc = self.artwork.clone();
+        std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                let _ = rt.block_on(svc.fetch_all_artwork(true, false));
+            }
+        });
+        self.set_status("Fetching artwork…", StatusKind::Info);
+    }
+
+    /// Poll bulk-artwork progress; returns true if the status changed.
+    fn poll_artwork_fetch(&mut self) -> bool {
+        if !self.artwork_fetching {
+            return false;
+        }
+        match self.artwork.get_progress() {
+            Some(p) if p.total_items > 0 && p.processed_items >= p.total_items => {
+                self.artwork_fetching = false;
+                self.set_status(
+                    format!("Artwork fetch complete ({} items)", p.total_items),
+                    StatusKind::Success,
+                );
+                true
+            }
+            Some(p) if p.total_items > 0 => {
+                self.set_status(
+                    format!("Fetching artwork: {}/{}", p.processed_items, p.total_items),
+                    StatusKind::Info,
+                );
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Open the tag editor for the current target(s).

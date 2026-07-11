@@ -1632,6 +1632,9 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::GoToArtist => open_current_track_artist(app),
         Command::Stats => app.compute_stats(),
         Command::Prefs => app.compute_prefs(),
+        Command::FetchArtwork => app.start_artwork_fetch(),
+        Command::SourceAdd { path } => start_scan(app, path),
+        Command::SourceRemove { id } => app.remove_source(id),
         Command::Refresh => {
             app.reload_current_view();
             app.set_status("Library refreshed", StatusKind::Success);

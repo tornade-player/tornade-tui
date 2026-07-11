@@ -269,6 +269,10 @@ impl LibraryState {
                         },
                         Style::default().fg(Color::DarkGray),
                     ),
+                    Span::styled(
+                        format!("  {:.1}MB", t.file_size as f64 / (1024.0 * 1024.0)),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]);
                 let line = Line::from(spans);
                 let style = if is_skipped {
