@@ -91,6 +91,13 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                     return;
                 }
             }
+            // Click on the player artwork: open the current track's album.
+            if let Some(art) = zones.artwork {
+                if rect_contains(art, col, row) {
+                    open_current_track_album(app);
+                    return;
+                }
+            }
             // Toolbar buttons (random / repeat / shuffle / add / remove)
             let tz = app.toolbar_hit_zones;
             if tz
@@ -680,7 +687,14 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
             let _ = app.player.previous();
         }
         KeyCode::Char(']') => {
-            let _ = app.player.seek(Duration::from_secs(10));
+            let total = app
+                .player_cache
+                .current_track
+                .as_ref()
+                .map(|t| t.duration.as_secs_f64())
+                .unwrap_or(f64::MAX);
+            let pos = (app.player_cache.position + 10.0).min(total);
+            let _ = app.player.seek(Duration::from_secs_f64(pos));
         }
         KeyCode::Char('[') => {
             let _ = app.player.seek(Duration::from_secs_f64(
@@ -843,6 +857,27 @@ fn push_album_detail(app: &mut AppState) {
         let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
         app.nav.push(View::AlbumDetail(state));
     }
+}
+
+/// Open the album-detail view for the currently playing track (used when the
+/// user clicks the player-bar artwork).
+fn open_current_track_album(app: &mut AppState) {
+    let album_id = match app
+        .player_cache
+        .current_track
+        .as_ref()
+        .and_then(|t| t.album_id)
+    {
+        Some(id) => id,
+        None => return,
+    };
+    let album = match app.library.get_album(album_id) {
+        Ok(Some(a)) => a,
+        _ => return,
+    };
+    let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+    let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
+    app.nav.push(View::AlbumDetail(state));
 }
 
 fn push_artist_detail(app: &mut AppState) {

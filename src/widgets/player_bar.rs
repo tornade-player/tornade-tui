@@ -23,6 +23,8 @@ pub struct PlayerHitZones {
     pub repeat: Option<Rect>,
     /// Progress gauge area; clicking within it seeks to that fraction.
     pub progress: Option<Rect>,
+    /// Player artwork area; clicking it opens the current track's album.
+    pub artwork: Option<Rect>,
 }
 
 /// Full player panel: artwork | info | volume (top) + controls+progress (bottom row).
@@ -202,6 +204,7 @@ pub fn render(
         shuffle: None,
         repeat: None,
         progress: Some(bottom[3]),
+        artwork: Some(top[0]),
     }
 }
 
