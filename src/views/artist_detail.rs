@@ -21,6 +21,7 @@ use tornade_core::{
 pub struct ArtistDetailState {
     pub artist: Artist,
     pub albums: Vec<Album>,
+    pub related: Vec<Artist>,
     pub list_state: ListState,
     image_state: Option<StatefulProtocol>,
     pending_image: Arc<Mutex<Option<DynamicImage>>>,
@@ -36,6 +37,7 @@ impl ArtistDetailState {
         photo_dir: &Path,
     ) -> Self {
         let albums = library.get_artist_albums(artist.id).unwrap_or_default();
+        let related = library.get_similar_artists(artist.id).unwrap_or_default();
         let mut list_state = ListState::default();
         if !albums.is_empty() {
             list_state.select(Some(0));
@@ -59,6 +61,7 @@ impl ArtistDetailState {
         Self {
             artist,
             albums,
+            related,
             list_state,
             image_state: None,
             pending_image,
@@ -123,12 +126,28 @@ impl ArtistDetailState {
         let has_pending = self.image_loading;
 
         let header_height = if self.image_state.is_some() { 10 } else { 4 };
+        let related_height: u16 = if self.related.is_empty() { 0 } else { 2 };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(header_height), Constraint::Min(0)])
+            .constraints([
+                Constraint::Length(header_height),
+                Constraint::Min(0),
+                Constraint::Length(related_height),
+            ])
             .split(area);
 
         self.render_header(frame, chunks[0]);
+
+        // Related artists (same-genre) footer.
+        if related_height > 0 {
+            let names: Vec<String> =
+                self.related.iter().take(6).map(|a| a.name.clone()).collect();
+            let line = Line::from(vec![
+                Span::styled("Related: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(names.join("  ·  "), Style::default().fg(Color::Cyan)),
+            ]);
+            frame.render_widget(Paragraph::new(line), chunks[2]);
+        }
 
         let items: Vec<ListItem> = self
             .albums
