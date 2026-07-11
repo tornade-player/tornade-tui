@@ -193,6 +193,10 @@ impl AlbumDetailState {
         if let Some(ref c) = self.album.country.clone() {
             self.push_info_row(&mut lines, "Country", c);
         }
+        let feats = self.featuring_artists();
+        if !feats.is_empty() {
+            self.push_info_row(&mut lines, "Featuring", &feats.join(", "));
+        }
 
         frame.render_widget(Paragraph::new(lines), v[1]);
     }
@@ -465,6 +469,22 @@ impl AlbumDetailState {
         if self.album.country.is_some() {
             n += 1;
         }
+        if !self.featuring_artists().is_empty() {
+            n += 1;
+        }
         n
+    }
+
+    /// Guest artists appearing on the album's tracks other than the album artist.
+    fn featuring_artists(&self) -> Vec<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        for t in &self.tracks {
+            for name in &t.artist_names {
+                if name != &self.album.artist_name {
+                    seen.insert(name.clone());
+                }
+            }
+        }
+        seen.into_iter().collect()
     }
 }

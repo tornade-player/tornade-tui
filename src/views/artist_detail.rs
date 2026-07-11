@@ -154,9 +154,20 @@ impl ArtistDetailState {
             .iter()
             .map(|a| {
                 let year = a.year.map(|y| format!("  {}", y)).unwrap_or_default();
+                // Badge singles / EPs so they are distinguishable from albums.
+                let badge = a
+                    .album_type
+                    .as_deref()
+                    .filter(|t| {
+                        let t = t.to_lowercase();
+                        t == "single" || t == "ep"
+                    })
+                    .map(|t| format!("  [{t}]"))
+                    .unwrap_or_default();
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{:<45} ", truncate(&a.title, 44))),
                     Span::styled(year, Style::default().fg(Color::DarkGray)),
+                    Span::styled(badge, Style::default().fg(Color::Yellow)),
                 ]))
             })
             .collect();
@@ -188,6 +199,18 @@ impl ArtistDetailState {
         has_pending
     }
 
+    /// One-line "about" summary from formed year and country, if available.
+    fn about_summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(y) = self.artist.formed_year {
+            parts.push(format!("Formed {y}"));
+        }
+        if let Some(ref c) = self.artist.country {
+            parts.push(c.clone());
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
     fn render_header(&mut self, frame: &mut Frame, area: Rect) {
         if let Some(ref mut protocol) = self.image_state {
             let h_chunks = Layout::default()
@@ -204,7 +227,7 @@ impl ArtistDetailState {
                 protocol,
             );
 
-            let meta = Paragraph::new(vec![
+            let mut meta_lines = vec![
                 Line::from(Span::styled(
                     truncate(&self.artist.name, 50),
                     Style::default()
@@ -215,8 +238,20 @@ impl ArtistDetailState {
                     format!("{} albums", self.albums.len()),
                     Style::default().fg(Color::DarkGray),
                 )),
-            ])
-            .block(Block::default());
+            ];
+            if let Some(about) = self.about_summary() {
+                meta_lines.push(Line::from(Span::styled(
+                    about,
+                    Style::default().fg(Color::Gray),
+                )));
+            }
+            if let Some(ref bio) = self.artist.bio {
+                meta_lines.push(Line::from(Span::styled(
+                    truncate(bio, 60),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            let meta = Paragraph::new(meta_lines).block(Block::default());
             frame.render_widget(meta, h_chunks[1]);
         } else {
             let header = Paragraph::new(vec![
