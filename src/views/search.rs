@@ -187,6 +187,22 @@ impl SearchState {
         let query_bar = Paragraph::new(Line::from(query_spans)).block(Block::default());
         frame.render_widget(query_bar, chunks[0]);
 
+        // Empty states: nothing typed yet, or a query with no matches.
+        let no_results =
+            self.tracks.is_empty() && self.albums.is_empty() && self.artists.is_empty();
+        if self.query.is_empty() || no_results {
+            let msg = if self.query.is_empty() {
+                "Type to search tracks, albums and artists.".to_string()
+            } else {
+                format!("No results for \"{}\".", self.query)
+            };
+            let para = Paragraph::new(msg)
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(ratatui::layout::Alignment::Center);
+            frame.render_widget(para, chunks[1]);
+            return;
+        }
+
         self.render_section(frame, chunks[1], SearchSection::Tracks, focused, selection);
         self.render_section(frame, chunks[2], SearchSection::Albums, focused, selection);
         self.render_section(frame, chunks[3], SearchSection::Artists, focused, selection);

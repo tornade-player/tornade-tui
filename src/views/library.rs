@@ -261,6 +261,14 @@ impl LibraryState {
                         Style::default().fg(Color::DarkGray),
                     ),
                     Span::styled(rating, Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        if t.play_count > 0 {
+                            format!("  {}×", t.play_count)
+                        } else {
+                            String::new()
+                        },
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]);
                 let line = Line::from(spans);
                 let style = if is_skipped {
