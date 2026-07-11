@@ -711,6 +711,54 @@ impl AppState {
         }
     }
 
+    /// Add `count` random library tracks to the queue.
+    pub fn add_random_to_queue(&mut self, count: usize) {
+        match self.library.get_random_tracks(count) {
+            Ok(ids) if !ids.is_empty() => {
+                let n = ids.len();
+                match self.player.add_to_queue(ids) {
+                    Ok(_) => self
+                        .set_status(format!("Added {n} random tracks to queue"), StatusKind::Success),
+                    Err(e) => self.set_status(format!("Error: {e}"), StatusKind::Error),
+                }
+            }
+            Ok(_) => self.set_status("No tracks available", StatusKind::Info),
+            Err(e) => self.set_status(format!("Error: {e}"), StatusKind::Error),
+        }
+    }
+
+    /// Export the currently open playlist to an M3U file.
+    pub fn export_current_playlist(&mut self, path: std::path::PathBuf) {
+        let pid = match self.nav.current() {
+            View::PlaylistDetail(s) => Some(s.playlist.id),
+            _ => None,
+        };
+        match pid {
+            Some(id) => match self.playlists.export_m3u(id, &path) {
+                Ok(_) => {
+                    self.set_status(format!("Exported to {}", path.display()), StatusKind::Success)
+                }
+                Err(e) => self.set_status(format!("Error: {e}"), StatusKind::Error),
+            },
+            None => self.set_status("Open a playlist to export", StatusKind::Error),
+        }
+    }
+
+    /// Rate the album currently open in album detail (0-5 stars).
+    pub fn rate_current_album(&mut self, stars: u8) {
+        let aid = match self.nav.current() {
+            View::AlbumDetail(s) => Some(s.album.id),
+            _ => None,
+        };
+        match aid {
+            Some(id) => match self.library.rate_album(id, stars) {
+                Ok(_) => self.set_status(format!("Rated album {stars}/5"), StatusKind::Success),
+                Err(e) => self.set_status(format!("Error: {e}"), StatusKind::Error),
+            },
+            None => self.set_status("Open an album to rate it", StatusKind::Error),
+        }
+    }
+
     /// Open the tag editor for the current target(s).
     ///
     /// If a multi-selection is active, opens the editor in album-level

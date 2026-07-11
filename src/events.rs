@@ -768,6 +768,7 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // TODO(US2): when multi-selection lands, `e` on an active selection
         // should open the editor in album-level (multi-track) mode.
         KeyCode::Char('e') => app.open_tag_editor(),
+        KeyCode::Char('o') => open_current_track_artist(app),
 
         // ── Library ──
         KeyCode::Char('s') => {
@@ -1615,6 +1616,10 @@ fn execute_command(app: &mut AppState, input: &str) {
                 app.set_status("Invalid seek position (use mm:ss)", StatusKind::Error);
             }
         }
+        Command::RateAlbum { stars } => app.rate_current_album(stars),
+        Command::QueueRandom { count } => app.add_random_to_queue(count),
+        Command::Export { path } => app.export_current_playlist(path),
+        Command::GoToArtist => open_current_track_artist(app),
         Command::Help => app.show_help = true,
         Command::Navigate(entry) => app.navigate_to(entry),
         Command::Unknown(msg) => {
@@ -1623,6 +1628,29 @@ fn execute_command(app: &mut AppState, input: &str) {
             }
         }
     }
+}
+
+/// Navigate to the artist of the currently highlighted track (`:artist` / `o`).
+fn open_current_track_artist(app: &mut AppState) {
+    let artist_id = app
+        .selected_track_id()
+        .and_then(|tid| app.library.get_track(tid).ok().flatten())
+        .map(|t| t.artist_id);
+    let Some(aid) = artist_id else {
+        app.set_status("No track selected", StatusKind::Error);
+        return;
+    };
+    let Ok(Some(artist)) = app.library.get_artist(aid) else {
+        return;
+    };
+    let tui_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
+    let photo_dir = if tui_dir.join(format!("{}.jpg", artist.id)).exists() {
+        tui_dir
+    } else {
+        app.paths.artist_photo_dir()
+    };
+    let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
+    app.nav.push(View::ArtistDetail(state));
 }
 
 fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
