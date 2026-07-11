@@ -352,6 +352,11 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
         return false;
     }
 
+    if app.show_stats {
+        app.show_stats = false;
+        return false;
+    }
+
     if app.show_playlist_selector {
         return handle_playlist_selector(app, key);
     }
@@ -1620,6 +1625,7 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::QueueRandom { count } => app.add_random_to_queue(count),
         Command::Export { path } => app.export_current_playlist(path),
         Command::GoToArtist => open_current_track_artist(app),
+        Command::Stats => app.compute_stats(),
         Command::Help => app.show_help = true,
         Command::Navigate(entry) => app.navigate_to(entry),
         Command::Unknown(msg) => {

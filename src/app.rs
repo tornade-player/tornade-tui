@@ -167,6 +167,8 @@ pub struct AppState {
 
     // UI overlays
     pub show_help: bool,
+    pub show_stats: bool,
+    pub stats_lines: Vec<(String, String)>,
     pub show_playlist_selector: bool,
     pub playlist_selector_state: ratatui::widgets::ListState,
     /// Tag editor overlay state; `Some` when the editor is open.
@@ -258,6 +260,8 @@ impl AppState {
             text_input: None,
             confirm: None,
             show_help: false,
+            show_stats: false,
+            stats_lines: Vec::new(),
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
             tag_editor: None,
@@ -757,6 +761,43 @@ impl AppState {
             },
             None => self.set_status("Open an album to rate it", StatusKind::Error),
         }
+    }
+
+    /// Compute library statistics and open the stats overlay.
+    pub fn compute_stats(&mut self) {
+        let albums = self
+            .library
+            .list_albums(None, None, None, None, None)
+            .map(|v| v.len())
+            .unwrap_or(0);
+        let artists = self.library.list_artists().map(|v| v.len()).unwrap_or(0);
+
+        let mut n_tracks = 0usize;
+        let mut total = std::time::Duration::ZERO;
+        let mut bytes = 0u64;
+        if let Ok(sources) = self.library.list_sources() {
+            for s in sources {
+                if let Ok(tracks) = self.library.get_source_tracks(s.id) {
+                    n_tracks += tracks.len();
+                    for t in &tracks {
+                        total += t.duration;
+                        bytes += t.file_size;
+                    }
+                }
+            }
+        }
+
+        let secs = total.as_secs();
+        let (h, m) = (secs / 3600, (secs % 3600) / 60);
+        let gb = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+        self.stats_lines = vec![
+            ("Tracks".to_string(), n_tracks.to_string()),
+            ("Albums".to_string(), albums.to_string()),
+            ("Artists".to_string(), artists.to_string()),
+            ("Total time".to_string(), format!("{h}h {m}m")),
+            ("Library size".to_string(), format!("{gb:.2} GB")),
+        ];
+        self.show_stats = true;
     }
 
     /// Open the tag editor for the current target(s).

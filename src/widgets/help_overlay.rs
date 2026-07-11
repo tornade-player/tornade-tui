@@ -99,6 +99,8 @@ pub fn render(frame: &mut Frame) {
             "Commands (:)",
             &[
                 (":scan <path>", "Scan a folder"),
+                (":scan music|downloads|…", "Scan a quick-access folder"),
+                (":stats", "Show library statistics"),
                 (":cleanup", "Remove missing files from library"),
                 (":rate <0-5>", "Rate selected track"),
                 (":rate album <0-5>", "Rate the open album"),

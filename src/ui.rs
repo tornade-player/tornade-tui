@@ -270,6 +270,10 @@ fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
     if app.show_help {
         help_overlay::render(frame);
     }
+
+    if app.show_stats {
+        crate::widgets::stats_overlay::render(frame, &app.stats_lines);
+    }
 }
 
 fn render_playlist_selector(frame: &mut Frame, app: &mut AppState, area: Rect) {

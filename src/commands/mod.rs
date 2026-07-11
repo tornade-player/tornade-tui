@@ -19,6 +19,7 @@ pub enum Command {
     Import { path: PathBuf },
     Export { path: PathBuf },
     GoToArtist,
+    Stats,
     Seek { position_str: String },
     Help,
     Navigate(SidebarEntry),
@@ -41,10 +42,18 @@ impl Command {
         match cmd.to_lowercase().as_str() {
             "scan" => {
                 if rest.is_empty() {
-                    Self::Unknown("scan requires a path: :scan <path>".to_string())
+                    Self::Unknown("scan requires a path: :scan <path|music|downloads|documents|desktop>".to_string())
                 } else {
+                    // Quick-access presets expand to the matching home folder.
+                    let preset = match rest.to_lowercase().as_str() {
+                        "music" => Some("~/Music"),
+                        "downloads" => Some("~/Downloads"),
+                        "documents" => Some("~/Documents"),
+                        "desktop" => Some("~/Desktop"),
+                        _ => None,
+                    };
                     Self::Scan {
-                        path: expand_tilde(rest),
+                        path: expand_tilde(preset.unwrap_or(rest)),
                     }
                 }
             }
@@ -110,6 +119,7 @@ impl Command {
                 }
             }
             "artist" => Self::GoToArtist,
+            "stats" => Self::Stats,
             "seek" => {
                 if rest.is_empty() {
                     Self::Unknown("seek requires a position: :seek <mm:ss>".to_string())
@@ -260,5 +270,19 @@ mod tests {
     #[test]
     fn parse_go_to_artist() {
         assert_eq!(Command::parse("artist"), Command::GoToArtist);
+    }
+
+    #[test]
+    fn parse_stats() {
+        assert_eq!(Command::parse("stats"), Command::Stats);
+    }
+
+    #[test]
+    fn parse_scan_preset() {
+        assert!(matches!(Command::parse("scan music"), Command::Scan { .. }));
+        assert!(matches!(
+            Command::parse("scan downloads"),
+            Command::Scan { .. }
+        ));
     }
 }

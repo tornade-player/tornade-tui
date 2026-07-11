@@ -7,4 +7,5 @@ pub mod player_bar;
 pub mod scrape_picker;
 pub mod selection;
 pub mod sidebar;
+pub mod stats_overlay;
 pub mod tag_editor;
