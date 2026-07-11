@@ -238,6 +238,7 @@ impl ArtistsState {
                             guard.push((id, result));
                         }
                         ACTIVE_IMAGE_THREADS.fetch_sub(1, Ordering::Relaxed);
+                        crate::wake::signal();
                     });
                 }
             }

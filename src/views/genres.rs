@@ -290,6 +290,7 @@ impl GenresState {
                     let mut q = queue.lock().unwrap();
                     q.push((orig_idx, DynamicImage::ImageRgba8(mosaic)));
                 }
+                crate::wake::signal();
             });
         }
 

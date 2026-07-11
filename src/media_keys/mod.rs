@@ -144,6 +144,7 @@ pub fn init(sender: Sender<MediaKeyEvent>) -> Option<MediaKeyHandle> {
         if let Some(ev) = normalize(&event) {
             // The UI thread may have exited; ignore send errors.
             let _ = sender.send(ev);
+            crate::wake::signal();
         }
     });
 

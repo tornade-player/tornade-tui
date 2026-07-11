@@ -29,6 +29,7 @@ mod tui_artwork;
 mod ui;
 mod utils;
 mod views;
+mod wake;
 mod widgets;
 
 use app::AppState;
@@ -114,12 +115,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Handle one wake-up. Returns `Ok(true)` when the app should quit.
+fn process_wake(app: &mut AppState, w: wake::Wake, needs_redraw: &mut bool) -> io::Result<bool> {
+    use ratatui::crossterm::event::MouseEventKind;
+    match w {
+        wake::Wake::Signal => *needs_redraw = true,
+        wake::Wake::Input(Event::Key(key)) => {
+            if events::handle_key(app, key) {
+                return Ok(true);
+            }
+            *needs_redraw = true;
+        }
+        wake::Wake::Input(Event::Mouse(mouse)) => {
+            // Only act on clicks/scroll, not moves (moves fire constantly).
+            if matches!(
+                mouse.kind,
+                MouseEventKind::Down(_)
+                    | MouseEventKind::Up(_)
+                    | MouseEventKind::ScrollDown
+                    | MouseEventKind::ScrollUp
+            ) {
+                events::handle_mouse(app, mouse);
+                *needs_redraw = true;
+            }
+        }
+        wake::Wake::Input(Event::Resize(_, _)) => *needs_redraw = true,
+        wake::Wake::Input(_) => {}
+    }
+    Ok(false)
+}
+
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut AppState,
     media_rx: std::sync::mpsc::Receiver<media_keys::MediaKeyEvent>,
     mut media_handle: Option<media_keys::MediaKeyHandle>,
 ) -> io::Result<()> {
+    use std::sync::mpsc::{RecvTimeoutError, channel};
     use std::time::Instant;
 
     let tick_rate = Duration::from_millis(500);
@@ -129,63 +161,51 @@ fn run_loop(
     // Last (track_id, is_playing) published to the OS now-playing surface.
     let mut prev_now_playing: Option<(i64, bool)> = None;
 
+    // Event-driven loop: block on a single wake channel instead of polling.
+    // A reader thread forwards terminal input; background workers (image decode,
+    // async jobs, media keys) call `wake::signal()`. The loop only wakes on a
+    // real event or the playback tick, so it never busy-spins and redraws the
+    // instant something changes — no image is re-emitted unless it must be.
+    let (wake_tx, wake_rx) = channel::<wake::Wake>();
+    wake::init(wake_tx.clone());
+    std::thread::spawn(move || {
+        while let Ok(ev) = event::read() {
+            if wake_tx.send(wake::Wake::Input(ev)).is_err() {
+                break;
+            }
+        }
+    });
+
     loop {
         if needs_redraw {
             terminal.draw(|f| ui::draw(f, app))?;
             needs_redraw = false;
         }
 
-        // Poll only for the time remaining until next tick.
-        // While background image loads are in progress, redraw at a bounded
-        // ~10 fps so newly decoded images appear promptly without pinning a CPU
-        // core (a tighter interval re-emits every visible image each frame,
-        // which is expensive — especially with the halfblocks protocol).
-        let timeout = if app.has_pending_images {
-            Duration::from_millis(100)
-        } else {
-            tick_rate.saturating_sub(last_tick.elapsed())
-        };
-        if event::poll(timeout)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if events::handle_key(app, key) {
+        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        match wake_rx.recv_timeout(timeout) {
+            Ok(w) => {
+                if process_wake(app, w, &mut needs_redraw)? {
+                    return Ok(());
+                }
+                // Coalesce a burst of wakes (e.g. many images finishing at once)
+                // into a single redraw.
+                while let Ok(w) = wake_rx.try_recv() {
+                    if process_wake(app, w, &mut needs_redraw)? {
                         return Ok(());
                     }
-                    needs_redraw = true;
                 }
-                Event::Mouse(mouse) => {
-                    // Only redraw on clicks, not mouse moves (moves fire constantly and are expensive)
-                    use ratatui::crossterm::event::MouseEventKind;
-                    if matches!(
-                        mouse.kind,
-                        MouseEventKind::Down(_)
-                            | MouseEventKind::Up(_)
-                            | MouseEventKind::ScrollDown
-                            | MouseEventKind::ScrollUp
-                    ) {
-                        events::handle_mouse(app, mouse);
-                        needs_redraw = true;
-                    }
-                }
-                Event::Resize(_, _) => {
-                    needs_redraw = true;
-                }
-                _ => {}
             }
-        } else if app.has_pending_images {
-            // Poll timed out while background image loads are in progress: redraw to pick up
-            // any newly decoded images that background threads may have pushed to the queue.
-            needs_redraw = true;
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
         }
 
-        // Drain any completed async jobs (online scrape / artwork). `poll_async`
-        // loops internally so we don't hold a borrow of `async_worker`.
+        // Drain any completed async jobs (online scrape / artwork).
         if app.poll_async() {
             needs_redraw = true;
         }
 
-        // Drain hardware media-key events (FR-024). Toggle is debounced so a
-        // single press cannot double play/pause (FR-027).
+        // Drain hardware media-key events (FR-024). Toggle is debounced (FR-027).
         while let Ok(ev) = media_rx.try_recv() {
             if matches!(ev, media_keys::MediaKeyEvent::Toggle)
                 && !toggle_debounce.accept(Instant::now())

@@ -55,6 +55,7 @@ impl ArtistDetailState {
                         *guard = Some(img);
                     }
                 }
+                crate::wake::signal();
             });
         }
 

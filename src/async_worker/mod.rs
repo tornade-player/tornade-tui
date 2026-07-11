@@ -150,6 +150,7 @@ fn worker_loop(req_rx: Receiver<Request>, res_tx: Sender<AsyncResult>) {
         if res_tx.send(AsyncResult { job_id, payload }).is_err() {
             break; // UI gone
         }
+        crate::wake::signal();
     }
 }
 
