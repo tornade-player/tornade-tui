@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use tornade_core::{models::Album, services::LibraryService};
 
 // Image height in terminal rows (fixed); width is computed from font metrics to make it square
-const IMG_H: u16 = 9;
+const IMG_H: u16 = 12;
 // Text rows below the image
 const TEXT_H: u16 = 3;
 // Padding rows between image bottom and text
@@ -171,14 +171,18 @@ impl AlbumsState {
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
         let area = chunks[2];
 
-        // Compute square image dimensions from font metrics
+        // Width in columns that makes the image square in *pixels* for the
+        // current font cell aspect: img_cols * font_w ≈ IMG_H * font_h. Keeping
+        // this exact is what lets the (square) thumbnail fill the cell instead of
+        // being letterboxed; a hard minimum wider than this would reintroduce a
+        // gap, so only clamp to a small floor.
         let font = picker.font_size();
         self.img_cols = if font.0 > 0 {
             ((IMG_H as u32 * font.1 as u32) / font.0 as u32) as u16
         } else {
             IMG_H
         };
-        self.img_cols = self.img_cols.max(14);
+        self.img_cols = self.img_cols.max(6);
 
         self.cell_stride_w = self.img_cols + GAP_W;
         self.cell_stride_h = IMG_H + TEXT_PADDING + TEXT_H + GAP_H;
