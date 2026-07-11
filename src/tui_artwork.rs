@@ -2,7 +2,7 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use tornade_core::utils::AppPaths;
 
-const JPEG_QUALITY: u8 = 70;
+const JPEG_QUALITY: u8 = 85;
 
 /// Compute target pixel dimensions for grid thumbnails from font metrics.
 /// `font` = (char_width_px, char_height_px), `img_h` = image height in terminal rows.
@@ -44,7 +44,9 @@ fn resize_to_jpeg(src: &Path, dst: &Path, target: (u32, u32)) {
         return;
     }
     let Ok(img) = image::open(src) else { return };
-    let resized = img.resize_to_fill(target.0, target.1, image::imageops::FilterType::Triangle);
+    // Lanczos3 gives a noticeably sharper downscale than Triangle (worth the
+    // one-time cost since thumbnails are cached on disk).
+    let resized = img.resize_to_fill(target.0, target.1, image::imageops::FilterType::Lanczos3);
     let Ok(file) = std::fs::File::create(dst) else {
         return;
     };

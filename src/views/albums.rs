@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use tornade_core::{models::Album, services::LibraryService};
 
 // Image height in terminal rows (fixed); width is computed from font metrics to make it square
-const IMG_H: u16 = 14;
+const IMG_H: u16 = 9;
 // Text rows below the image
 const TEXT_H: u16 = 3;
 // Padding rows between image bottom and text

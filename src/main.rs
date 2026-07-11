@@ -52,11 +52,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Detect terminal image protocol before entering raw mode.
     let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-    // Ghostty: ratatui_image v10 detects Sixel but rendering fails.
-    // Kitty uses Unicode placeholders (U=1) which Ghostty doesn't support either.
-    // Halfblocks is the only working protocol; font_size from query is preserved.
-    if std::env::var("TERM_PROGRAM").is_ok_and(|v| v.eq_ignore_ascii_case("ghostty")) {
-        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Halfblocks);
+    // Optional override for crisper artwork on terminals with working pixel
+    // graphics: TORNADE_IMG_PROTOCOL=kitty|sixel|iterm2|halfblocks|auto.
+    // Halfblocks is blocky (1px per column); Kitty/Sixel/iTerm2 render at full
+    // pixel resolution. Ghostty now supports Kitty & Sixel, so users can try
+    // `TORNADE_IMG_PROTOCOL=kitty` for sharp images.
+    use ratatui_image::picker::ProtocolType;
+    match std::env::var("TORNADE_IMG_PROTOCOL")
+        .ok()
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("kitty") => picker.set_protocol_type(ProtocolType::Kitty),
+        Some("sixel") => picker.set_protocol_type(ProtocolType::Sixel),
+        Some("iterm2") => picker.set_protocol_type(ProtocolType::Iterm2),
+        Some("halfblocks") => picker.set_protocol_type(ProtocolType::Halfblocks),
+        Some("auto") => {} // keep the auto-detected protocol
+        _ => {
+            // Default: ratatui-image v10's Sixel/Kitty paths are unreliable on
+            // Ghostty, so fall back to halfblocks there unless overridden above.
+            if std::env::var("TERM_PROGRAM").is_ok_and(|v| v.eq_ignore_ascii_case("ghostty")) {
+                picker.set_protocol_type(ProtocolType::Halfblocks);
+            }
+        }
     }
 
     // Setup terminal
@@ -66,8 +84,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Compute target pixel size for grid thumbnails from font metrics
-    let tui_target = tui_artwork::tui_target_size(picker.font_size(), 14);
+    // Compute target pixel size for grid thumbnails. Generate at ~2x the 9-row
+    // display height so the downscale stays sharp (supersampling), which also
+    // gives pixel-graphics protocols enough detail to render crisply.
+    let tui_target = tui_artwork::tui_target_size(picker.font_size(), 20);
 
     // Migrate existing artwork to TUI thumbnails in background (non-blocking)
     {

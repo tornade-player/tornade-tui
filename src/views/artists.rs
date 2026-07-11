@@ -16,7 +16,7 @@ use tornade_core::models::Artist;
 use tornade_core::services::LibraryService;
 
 // Image height in terminal rows (fixed); width computed from font metrics for square cells
-const IMG_H: u16 = 14;
+const IMG_H: u16 = 9;
 // Text rows below the image
 const TEXT_H: u16 = 2;
 // Padding rows between image bottom and text
