@@ -274,6 +274,10 @@ fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
     if app.show_stats {
         crate::widgets::stats_overlay::render(frame, &app.stats_lines);
     }
+
+    if app.show_prefs {
+        crate::widgets::stats_overlay::render_titled(frame, " Preferences ", &app.prefs_lines);
+    }
 }
 
 fn render_playlist_selector(frame: &mut Frame, app: &mut AppState, area: Rect) {

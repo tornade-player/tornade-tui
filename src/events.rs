@@ -357,6 +357,11 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
         return false;
     }
 
+    if app.show_prefs {
+        app.show_prefs = false;
+        return false;
+    }
+
     if app.show_playlist_selector {
         return handle_playlist_selector(app, key);
     }
@@ -1626,6 +1631,7 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::Export { path } => app.export_current_playlist(path),
         Command::GoToArtist => open_current_track_artist(app),
         Command::Stats => app.compute_stats(),
+        Command::Prefs => app.compute_prefs(),
         Command::Refresh => {
             app.reload_current_view();
             app.set_status("Library refreshed", StatusKind::Success);

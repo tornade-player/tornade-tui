@@ -9,7 +9,18 @@ use ratatui::{
 /// Render the library-statistics overlay (`:stats`). `lines` is a list of
 /// (label, value) pairs. Any key dismisses it.
 pub fn render(frame: &mut Frame, lines: &[(String, String)]) {
-    let area = centered_rect(40, (lines.len() + 4) as u16, frame.area());
+    render_titled(frame, " Library statistics ", lines);
+}
+
+/// Render a titled key/value overlay (shared by `:stats` and `:prefs`).
+pub fn render_titled(frame: &mut Frame, title: &str, lines: &[(String, String)]) {
+    let width = lines
+        .iter()
+        .map(|(l, v)| l.len() + v.len() + 6)
+        .max()
+        .unwrap_or(40)
+        .clamp(30, 90) as u16;
+    let area = centered_rect(width, (lines.len() + 4) as u16, frame.area());
     frame.render_widget(Clear, area);
 
     let items: Vec<ListItem> = lines
@@ -29,7 +40,7 @@ pub fn render(frame: &mut Frame, lines: &[(String, String)]) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Library statistics ")
+        .title(title.to_string())
         .title_style(Style::default().add_modifier(Modifier::BOLD));
 
     frame.render_widget(List::new(items).block(block), area);

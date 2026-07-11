@@ -169,6 +169,8 @@ pub struct AppState {
     pub show_help: bool,
     pub show_stats: bool,
     pub stats_lines: Vec<(String, String)>,
+    pub show_prefs: bool,
+    pub prefs_lines: Vec<(String, String)>,
     pub show_playlist_selector: bool,
     pub playlist_selector_state: ratatui::widgets::ListState,
     /// Tag editor overlay state; `Some` when the editor is open.
@@ -262,6 +264,8 @@ impl AppState {
             show_help: false,
             show_stats: false,
             stats_lines: Vec::new(),
+            show_prefs: false,
+            prefs_lines: Vec::new(),
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
             tag_editor: None,
@@ -798,6 +802,30 @@ impl AppState {
             ("Library size".to_string(), format!("{gb:.2} GB")),
         ];
         self.show_stats = true;
+    }
+
+    /// Build the preferences/configuration overlay (`:prefs`).
+    pub fn compute_prefs(&mut self) {
+        let mut lines = vec![
+            ("Version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+            (
+                "Database".to_string(),
+                self.paths.database_path().display().to_string(),
+            ),
+        ];
+        if let Ok(sources) = self.library.list_sources() {
+            lines.push(("Sources".to_string(), sources.len().to_string()));
+            for s in sources.iter().take(8) {
+                let path = s
+                    .path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                lines.push((format!("  {}", s.name), path));
+            }
+        }
+        self.prefs_lines = lines;
+        self.show_prefs = true;
     }
 
     /// Open the tag editor for the current target(s).

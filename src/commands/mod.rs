@@ -21,6 +21,7 @@ pub enum Command {
     GoToArtist,
     Refresh,
     Stats,
+    Prefs,
     Sort { field: String },
     Seek { position_str: String },
     Help,
@@ -123,6 +124,7 @@ impl Command {
             "artist" => Self::GoToArtist,
             "refresh" => Self::Refresh,
             "stats" => Self::Stats,
+            "prefs" | "preferences" | "settings" => Self::Prefs,
             "sort" => {
                 if rest.is_empty() {
                     Self::Unknown(
