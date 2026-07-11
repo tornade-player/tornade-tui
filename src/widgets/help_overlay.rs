@@ -101,6 +101,7 @@ pub fn render(frame: &mut Frame) {
                 (":scan <path>", "Scan a folder"),
                 (":scan music|downloads|…", "Scan a quick-access folder"),
                 (":stats", "Show library statistics"),
+                (":refresh", "Reload the current view from the database"),
                 (":sort <field>", "Sort tracks (title/artist/duration/rating/plays)"),
                 (":cleanup", "Remove missing files from library"),
                 (":rate <0-5>", "Rate selected track"),

@@ -1626,6 +1626,10 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::Export { path } => app.export_current_playlist(path),
         Command::GoToArtist => open_current_track_artist(app),
         Command::Stats => app.compute_stats(),
+        Command::Refresh => {
+            app.reload_current_view();
+            app.set_status("Library refreshed", StatusKind::Success);
+        }
         Command::Sort { field } => {
             use crate::views::library::SortKey;
             match SortKey::from_str(&field) {

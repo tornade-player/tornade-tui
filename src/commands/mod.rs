@@ -19,6 +19,7 @@ pub enum Command {
     Import { path: PathBuf },
     Export { path: PathBuf },
     GoToArtist,
+    Refresh,
     Stats,
     Sort { field: String },
     Seek { position_str: String },
@@ -120,6 +121,7 @@ impl Command {
                 }
             }
             "artist" => Self::GoToArtist,
+            "refresh" => Self::Refresh,
             "stats" => Self::Stats,
             "sort" => {
                 if rest.is_empty() {
