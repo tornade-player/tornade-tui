@@ -21,6 +21,8 @@ pub struct PlayerHitZones {
     pub next: Option<Rect>,
     pub shuffle: Option<Rect>,
     pub repeat: Option<Rect>,
+    /// Progress gauge area; clicking within it seeks to that fraction.
+    pub progress: Option<Rect>,
 }
 
 /// Full player panel: artwork | info | volume (top) + controls+progress (bottom row).
@@ -199,6 +201,7 @@ pub fn render(
         next: Some(transport[2]),
         shuffle: None,
         repeat: None,
+        progress: Some(bottom[3]),
     }
 }
 
