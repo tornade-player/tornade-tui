@@ -322,7 +322,7 @@ fn render_cell(
 
     if let Some(proto) = protocol {
         frame.render_stateful_widget(
-            StatefulImage::new().resize(Resize::Fit(Some(image::imageops::FilterType::Triangle))),
+            StatefulImage::new().resize(Resize::Crop(None)),
             img_rect,
             proto,
         );

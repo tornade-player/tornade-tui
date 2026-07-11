@@ -397,7 +397,10 @@ fn render_cell(
 
     if let Some(proto) = protocol {
         frame.render_stateful_widget(
-            StatefulImage::new().resize(Resize::Fit(Some(image::imageops::FilterType::Triangle))),
+            // Crop fills the whole cell (covers) instead of letterboxing a
+            // smaller image inside it — thumbnails are supersampled so there is
+            // enough resolution and the crop of a square cover is negligible.
+            StatefulImage::new().resize(Resize::Crop(None)),
             img_rect,
             proto,
         );
