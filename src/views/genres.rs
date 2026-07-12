@@ -31,6 +31,7 @@ pub struct GenresState {
     pub genres: Vec<(Genre, u32, u32)>,
     pub filter: String,
     pub filter_active: bool,
+    pub mode: crate::views::ViewMode,
     pub list_state: ListState,
     /// Artwork paths (up to 4) per genre, indexed parallel to `genres`.
     artwork_paths: Vec<Vec<PathBuf>>,
@@ -50,6 +51,7 @@ impl Default for GenresState {
             genres: Vec::new(),
             filter: String::new(),
             filter_active: false,
+            mode: crate::views::ViewMode::default(),
             list_state: ListState::default(),
             artwork_paths: Vec::new(),
             image_states: Vec::new(),
@@ -129,6 +131,11 @@ impl GenresState {
         }
     }
 
+    /// Toggle between the compact list and the artwork mosaic.
+    pub fn toggle_mode(&mut self) {
+        self.mode.toggle();
+    }
+
     pub fn render(
         &mut self,
         frame: &mut Frame,
@@ -153,7 +160,9 @@ impl GenresState {
         let has_photos = self.artwork_paths.iter().any(|p| !p.is_empty());
         let has_filter = !self.filter.is_empty();
 
-        let has_pending = if artwork && has_photos && !has_filter && IMG_WIDTH + 2 < area.width {
+        let grid = self.mode == crate::views::ViewMode::Grid;
+        let has_pending = if grid && artwork && has_photos && !has_filter && IMG_WIDTH + 2 < area.width
+        {
             let orig_indices: Vec<usize> = filtered
                 .iter()
                 .filter_map(|fg| self.genres.iter().position(|(g, _, _)| g.id == fg.0.id))

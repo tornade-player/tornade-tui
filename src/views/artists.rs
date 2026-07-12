@@ -5,7 +5,10 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
@@ -36,6 +39,7 @@ pub struct ArtistsState {
     pub list_state: ListState,
     pub filter: String,
     pub filter_active: bool,
+    pub mode: crate::views::ViewMode,
     pub selected: usize,
     pub scroll_row: usize,
     pub cols: usize,
@@ -57,6 +61,7 @@ impl Default for ArtistsState {
             list_state: ListState::default(),
             filter: String::new(),
             filter_active: false,
+            mode: crate::views::ViewMode::default(),
             selected: 0,
             scroll_row: 0,
             cols: 4,
@@ -135,6 +140,50 @@ impl ArtistsState {
         self.list_state.select(Some(self.selected));
     }
 
+    /// Toggle between the compact list and the artwork grid.
+    pub fn toggle_mode(&mut self) {
+        self.mode.toggle();
+    }
+
+    /// Compact text list of artists (name + formed year / country).
+    fn render_list(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        self.cols = 1;
+        let artists = self.display_artists();
+        let len = artists.len();
+        let items: Vec<ListItem> = artists
+            .iter()
+            .map(|a| {
+                let mut extra = Vec::new();
+                if let Some(y) = a.formed_year {
+                    extra.push(y.to_string());
+                }
+                if let Some(ref c) = a.country {
+                    extra.push(c.clone());
+                }
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:<44} ", truncate(&a.name, 43))),
+                    Span::styled(extra.join(" · "), Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect();
+        let hl = if focused {
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        let mut ls = ListState::default();
+        if len > 0 {
+            ls.select(Some(self.selected.min(len - 1)));
+        }
+        frame.render_stateful_widget(
+            List::new(items).highlight_style(hl).highlight_symbol("> "),
+            area,
+            &mut ls,
+        );
+    }
+
     pub fn render(
         &mut self,
         frame: &mut Frame,
@@ -154,6 +203,12 @@ impl ArtistsState {
         .split(area);
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
         let area = chunks[2];
+
+        // List mode: compact text rows, no artwork decoding.
+        if self.mode == crate::views::ViewMode::List {
+            self.render_list(frame, area, focused);
+            return false;
+        }
 
         let font = picker.font_size();
         self.img_cols = if font.0 > 0 {

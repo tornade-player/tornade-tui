@@ -668,9 +668,17 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
                 _ => {}
             }
         }
-        KeyCode::Char('m') if matches!(app.nav.current(), View::Albums(_)) => {
-            if let View::Albums(s) = app.nav.current_mut() {
-                s.toggle_mode();
+        KeyCode::Char('m')
+            if matches!(
+                app.nav.current(),
+                View::Albums(_) | View::Artists(_) | View::Genres(_)
+            ) =>
+        {
+            match app.nav.current_mut() {
+                View::Albums(s) => s.toggle_mode(),
+                View::Artists(s) => s.toggle_mode(),
+                View::Genres(s) => s.toggle_mode(),
+                _ => {}
             }
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => page_down(app),

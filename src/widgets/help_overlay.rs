@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame) {
             &[
                 ("s", "Scan music folder"),
                 ("/", "Filter current view"),
-                ("m", "Albums: toggle list / artwork grid"),
+                ("m", "Albums/Artists/Genres: toggle list / artwork"),
                 ("0–5", "Set rating on selected track"),
             ],
         ),

@@ -7,6 +7,24 @@ use std::sync::atomic::AtomicUsize;
 pub static ACTIVE_IMAGE_THREADS: AtomicUsize = AtomicUsize::new(0);
 pub const MAX_IMAGE_THREADS: usize = 4;
 
+/// Display mode for the artwork views (albums/artists/genres): a compact text
+/// list (default, no image decoding) or the artwork grid. Toggled with `m`.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    #[default]
+    List,
+    Grid,
+}
+
+impl ViewMode {
+    pub fn toggle(&mut self) {
+        *self = match self {
+            ViewMode::List => ViewMode::Grid,
+            ViewMode::Grid => ViewMode::List,
+        };
+    }
+}
+
 pub mod album_detail;
 pub mod albums;
 pub mod artist_detail;

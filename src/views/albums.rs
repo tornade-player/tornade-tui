@@ -32,22 +32,14 @@ const GRID_PAD: u16 = 1;
 /// None signals a failed load so the id is removed from loading_ids without caching.
 type PendingQueue = Arc<Mutex<Vec<(i64, Option<image::DynamicImage>)>>>;
 
-/// Albums can be shown as a compact text list (default, no artwork) or as an
-/// artwork grid. The list avoids all image decoding, so it stays instant on
-/// large libraries.
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub enum AlbumViewMode {
-    #[default]
-    List,
-    Grid,
-}
+use crate::views::ViewMode;
 
 pub struct AlbumsState {
     pub albums: Vec<Album>,
     pub search_results: Option<Vec<Album>>,
     pub filter: String,
     pub filter_active: bool,
-    pub mode: AlbumViewMode,
+    pub mode: ViewMode,
     pub selected: usize,
     pub scroll_row: usize,
     pub cols: usize,
@@ -71,7 +63,7 @@ impl Default for AlbumsState {
             search_results: None,
             filter: String::new(),
             filter_active: false,
-            mode: AlbumViewMode::default(),
+            mode: ViewMode::default(),
             selected: 0,
             scroll_row: 0,
             cols: 4,
@@ -183,8 +175,8 @@ impl AlbumsState {
     /// Toggle between the compact list and the artwork grid.
     pub fn toggle_mode(&mut self) {
         self.mode = match self.mode {
-            AlbumViewMode::List => AlbumViewMode::Grid,
-            AlbumViewMode::Grid => AlbumViewMode::List,
+            ViewMode::List => ViewMode::Grid,
+            ViewMode::Grid => ViewMode::List,
         };
     }
 
@@ -245,7 +237,7 @@ impl AlbumsState {
         let area = chunks[2];
 
         // List mode: compact text rows, no artwork decoding at all.
-        if self.mode == AlbumViewMode::List {
+        if self.mode == ViewMode::List {
             self.render_list(frame, area, focused);
             return false;
         }
