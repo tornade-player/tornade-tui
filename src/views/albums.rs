@@ -5,7 +5,10 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
@@ -29,11 +32,22 @@ const GRID_PAD: u16 = 1;
 /// None signals a failed load so the id is removed from loading_ids without caching.
 type PendingQueue = Arc<Mutex<Vec<(i64, Option<image::DynamicImage>)>>>;
 
+/// Albums can be shown as a compact text list (default, no artwork) or as an
+/// artwork grid. The list avoids all image decoding, so it stays instant on
+/// large libraries.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumViewMode {
+    #[default]
+    List,
+    Grid,
+}
+
 pub struct AlbumsState {
     pub albums: Vec<Album>,
     pub search_results: Option<Vec<Album>>,
     pub filter: String,
     pub filter_active: bool,
+    pub mode: AlbumViewMode,
     pub selected: usize,
     pub scroll_row: usize,
     pub cols: usize,
@@ -57,6 +71,7 @@ impl Default for AlbumsState {
             search_results: None,
             filter: String::new(),
             filter_active: false,
+            mode: AlbumViewMode::default(),
             selected: 0,
             scroll_row: 0,
             cols: 4,
@@ -162,6 +177,64 @@ impl AlbumsState {
         tui_dir: &Path,
         artwork: bool,
     ) -> bool {
+        self.render_impl(frame, area, focused, picker, tui_dir, artwork)
+    }
+
+    /// Toggle between the compact list and the artwork grid.
+    pub fn toggle_mode(&mut self) {
+        self.mode = match self.mode {
+            AlbumViewMode::List => AlbumViewMode::Grid,
+            AlbumViewMode::Grid => AlbumViewMode::List,
+        };
+    }
+
+    /// Compact text list of albums (title / artist / year). No image decoding.
+    fn render_list(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        self.cols = 1; // one album per row → up/down navigation
+        let albums = self.display_albums();
+        let len = albums.len();
+        let items: Vec<ListItem> = albums
+            .iter()
+            .map(|a| {
+                let year = a.year.map(|y| y.to_string()).unwrap_or_default();
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:<42} ", truncate(&a.title, 41))),
+                    Span::styled(
+                        format!("{:<28} ", truncate(&a.artist_name, 27)),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(year, Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect();
+        let hl = if focused {
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        let mut ls = ListState::default();
+        if len > 0 {
+            ls.select(Some(self.selected.min(len - 1)));
+        }
+        frame.render_stateful_widget(
+            List::new(items).highlight_style(hl).highlight_symbol("> "),
+            area,
+            &mut ls,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_impl(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        picker: &mut Picker,
+        tui_dir: &Path,
+        artwork: bool,
+    ) -> bool {
         let chunks = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
@@ -170,6 +243,12 @@ impl AlbumsState {
         .split(area);
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
         let area = chunks[2];
+
+        // List mode: compact text rows, no artwork decoding at all.
+        if self.mode == AlbumViewMode::List {
+            self.render_list(frame, area, focused);
+            return false;
+        }
 
         // Width in columns that makes the image square in *pixels* for the
         // current font cell aspect: img_cols * font_w ≈ IMG_H * font_h. Keeping
