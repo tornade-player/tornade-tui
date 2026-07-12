@@ -161,59 +161,59 @@ impl GenresState {
         let has_filter = !self.filter.is_empty();
 
         let grid = self.mode == crate::views::ViewMode::Grid;
-        let has_pending = if grid && artwork && has_photos && !has_filter && IMG_WIDTH + 2 < area.width
-        {
-            let orig_indices: Vec<usize> = filtered
-                .iter()
-                .filter_map(|fg| self.genres.iter().position(|(g, _, _)| g.id == fg.0.id))
-                .collect();
-            let names: Vec<String> = filtered.iter().map(|(g, _, _)| g.name.clone()).collect();
-            drop(filtered);
-            self.render_with_images(
-                frame,
-                chunks[2],
-                &names,
-                &orig_indices,
-                selected,
-                focused,
-                picker,
-                tui_dir,
-            )
-        } else {
-            let items: Vec<ListItem> = filtered
-                .iter()
-                .map(|(g, tracks, albums)| {
-                    ListItem::new(Line::from(vec![
-                        Span::raw(format!("{:<40} ", truncate(&g.name, 39))),
-                        Span::styled(
-                            format!("{} tracks", tracks),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                        Span::styled(
-                            format!("  {} albums", albums),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]))
-                })
-                .collect();
-            drop(filtered);
-            let (hl_style, hl_sym) = if focused {
-                (
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD),
-                    "> ",
+        let has_pending =
+            if grid && artwork && has_photos && !has_filter && IMG_WIDTH + 2 < area.width {
+                let orig_indices: Vec<usize> = filtered
+                    .iter()
+                    .filter_map(|fg| self.genres.iter().position(|(g, _, _)| g.id == fg.0.id))
+                    .collect();
+                let names: Vec<String> = filtered.iter().map(|(g, _, _)| g.name.clone()).collect();
+                drop(filtered);
+                self.render_with_images(
+                    frame,
+                    chunks[2],
+                    &names,
+                    &orig_indices,
+                    selected,
+                    focused,
+                    picker,
+                    tui_dir,
                 )
             } else {
-                (Style::default().fg(Color::DarkGray), "  ")
+                let items: Vec<ListItem> = filtered
+                    .iter()
+                    .map(|(g, tracks, albums)| {
+                        ListItem::new(Line::from(vec![
+                            Span::raw(format!("{:<40} ", truncate(&g.name, 39))),
+                            Span::styled(
+                                format!("{} tracks", tracks),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(
+                                format!("  {} albums", albums),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]))
+                    })
+                    .collect();
+                drop(filtered);
+                let (hl_style, hl_sym) = if focused {
+                    (
+                        Style::default()
+                            .bg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
+                        "> ",
+                    )
+                } else {
+                    (Style::default().fg(Color::DarkGray), "  ")
+                };
+                let list = List::new(items)
+                    .block(Block::default())
+                    .highlight_style(hl_style)
+                    .highlight_symbol(hl_sym);
+                frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
+                false
             };
-            let list = List::new(items)
-                .block(Block::default())
-                .highlight_style(hl_style)
-                .highlight_symbol(hl_sym);
-            frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
-            false
-        };
 
         let pos = self.list_state.selected().unwrap_or(0);
         self.scrollbar_state = ScrollbarState::new(filtered_len).position(pos);

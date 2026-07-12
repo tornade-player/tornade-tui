@@ -49,7 +49,10 @@ impl Command {
         match cmd.to_lowercase().as_str() {
             "scan" => {
                 if rest.is_empty() {
-                    Self::Unknown("scan requires a path: :scan <path|music|downloads|documents|desktop>".to_string())
+                    Self::Unknown(
+                        "scan requires a path: :scan <path|music|downloads|documents|desktop>"
+                            .to_string(),
+                    )
                 } else {
                     // Quick-access presets expand to the matching home folder.
                     let preset = match rest.to_lowercase().as_str() {
@@ -70,7 +73,9 @@ impl Command {
                 if let Some(n) = lower.strip_prefix("album").map(str::trim) {
                     match n.parse::<u8>() {
                         Ok(n) if n <= 5 => Self::RateAlbum { stars: n },
-                        _ => Self::Unknown("rate album requires 0-5: :rate album <0-5>".to_string()),
+                        _ => {
+                            Self::Unknown("rate album requires 0-5: :rate album <0-5>".to_string())
+                        }
                     }
                 } else {
                     match rest.parse::<u8>() {
@@ -140,9 +145,13 @@ impl Command {
                     },
                     "remove" | "rm" => match arg.trim().parse::<i64>() {
                         Ok(id) => Self::SourceRemove { id },
-                        _ => Self::Unknown("source remove needs an id: :source remove <id>".to_string()),
+                        _ => Self::Unknown(
+                            "source remove needs an id: :source remove <id>".to_string(),
+                        ),
                     },
-                    _ => Self::Unknown("usage: :source add <path> | :source remove <id>".to_string()),
+                    _ => {
+                        Self::Unknown("usage: :source add <path> | :source remove <id>".to_string())
+                    }
                 }
             }
             "prefs" | "preferences" | "settings" => Self::Prefs,
@@ -288,8 +297,14 @@ mod tests {
 
     #[test]
     fn parse_rate_album() {
-        assert_eq!(Command::parse("rate album 4"), Command::RateAlbum { stars: 4 });
-        assert!(matches!(Command::parse("rate album 9"), Command::Unknown(_)));
+        assert_eq!(
+            Command::parse("rate album 4"),
+            Command::RateAlbum { stars: 4 }
+        );
+        assert!(matches!(
+            Command::parse("rate album 9"),
+            Command::Unknown(_)
+        ));
     }
 
     #[test]

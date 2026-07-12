@@ -106,9 +106,15 @@ pub fn render(frame: &mut Frame) {
                 (":fetchart", "Fetch missing artwork from MusicBrainz"),
                 (":artwork on|off", "Toggle album/artist artwork (perf)"),
                 (":source add <path>", "Add & scan a library source"),
-                (":source remove <id>", "Remove a library source (see :prefs)"),
+                (
+                    ":source remove <id>",
+                    "Remove a library source (see :prefs)",
+                ),
                 (":refresh", "Reload the current view from the database"),
-                (":sort <field>", "Sort tracks (title/artist/duration/rating/plays)"),
+                (
+                    ":sort <field>",
+                    "Sort tracks (title/artist/duration/rating/plays)",
+                ),
                 (":cleanup", "Remove missing files from library"),
                 (":rate <0-5>", "Rate selected track"),
                 (":rate album <0-5>", "Rate the open album"),

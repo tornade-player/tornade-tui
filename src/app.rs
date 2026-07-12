@@ -734,8 +734,10 @@ impl AppState {
             Ok(ids) if !ids.is_empty() => {
                 let n = ids.len();
                 match self.player.add_to_queue(ids) {
-                    Ok(_) => self
-                        .set_status(format!("Added {n} random tracks to queue"), StatusKind::Success),
+                    Ok(_) => self.set_status(
+                        format!("Added {n} random tracks to queue"),
+                        StatusKind::Success,
+                    ),
                     Err(e) => self.set_status(format!("Error: {e}"), StatusKind::Error),
                 }
             }
@@ -752,9 +754,10 @@ impl AppState {
         };
         match pid {
             Some(id) => match self.playlists.export_m3u(id, &path) {
-                Ok(_) => {
-                    self.set_status(format!("Exported to {}", path.display()), StatusKind::Success)
-                }
+                Ok(_) => self.set_status(
+                    format!("Exported to {}", path.display()),
+                    StatusKind::Success,
+                ),
                 Err(e) => self.set_status(format!("Error: {e}"), StatusKind::Error),
             },
             None => self.set_status("Open a playlist to export", StatusKind::Error),

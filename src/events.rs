@@ -83,8 +83,8 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                     if let Some(track) = app.player_cache.current_track.as_ref() {
                         let total = track.duration.as_secs_f64();
                         if pr.width > 0 && total > 0.0 {
-                            let frac = (col.saturating_sub(pr.x) as f64 / pr.width as f64)
-                                .clamp(0.0, 1.0);
+                            let frac =
+                                (col.saturating_sub(pr.x) as f64 / pr.width as f64).clamp(0.0, 1.0);
                             let _ = app.player.seek(Duration::from_secs_f64(frac * total));
                         }
                     }

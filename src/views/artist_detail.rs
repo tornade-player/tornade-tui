@@ -143,8 +143,12 @@ impl ArtistDetailState {
 
         // Related artists (same-genre) footer.
         if related_height > 0 {
-            let names: Vec<String> =
-                self.related.iter().take(6).map(|a| a.name.clone()).collect();
+            let names: Vec<String> = self
+                .related
+                .iter()
+                .take(6)
+                .map(|a| a.name.clone())
+                .collect();
             let line = Line::from(vec![
                 Span::styled("Related: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(names.join("  ·  "), Style::default().fg(Color::Cyan)),

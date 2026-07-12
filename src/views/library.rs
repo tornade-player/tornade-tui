@@ -113,8 +113,16 @@ impl LibraryState {
                 SortKey::None => std::cmp::Ordering::Equal,
                 SortKey::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
                 SortKey::Artist => {
-                    let an = a.artist_names.first().map(|s| s.to_lowercase()).unwrap_or_default();
-                    let bn = b.artist_names.first().map(|s| s.to_lowercase()).unwrap_or_default();
+                    let an = a
+                        .artist_names
+                        .first()
+                        .map(|s| s.to_lowercase())
+                        .unwrap_or_default();
+                    let bn = b
+                        .artist_names
+                        .first()
+                        .map(|s| s.to_lowercase())
+                        .unwrap_or_default();
                     an.cmp(&bn)
                 }
                 SortKey::Duration => a.duration.cmp(&b.duration),
