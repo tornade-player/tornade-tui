@@ -78,25 +78,25 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 return;
             }
             // Click on the progress gauge: seek to that fraction of the track.
-            if let Some(pr) = zones.progress {
-                if rect_contains(pr, col, row) {
-                    if let Some(track) = app.player_cache.current_track.as_ref() {
-                        let total = track.duration.as_secs_f64();
-                        if pr.width > 0 && total > 0.0 {
-                            let frac =
-                                (col.saturating_sub(pr.x) as f64 / pr.width as f64).clamp(0.0, 1.0);
-                            let _ = app.player.seek(Duration::from_secs_f64(frac * total));
-                        }
+            if let Some(pr) = zones.progress
+                && rect_contains(pr, col, row)
+            {
+                if let Some(track) = app.player_cache.current_track.as_ref() {
+                    let total = track.duration.as_secs_f64();
+                    if pr.width > 0 && total > 0.0 {
+                        let frac =
+                            (col.saturating_sub(pr.x) as f64 / pr.width as f64).clamp(0.0, 1.0);
+                        let _ = app.player.seek(Duration::from_secs_f64(frac * total));
                     }
-                    return;
                 }
+                return;
             }
             // Click on the player artwork: open the current track's album.
-            if let Some(art) = zones.artwork {
-                if rect_contains(art, col, row) {
-                    open_current_track_album(app);
-                    return;
-                }
+            if let Some(art) = zones.artwork
+                && rect_contains(art, col, row)
+            {
+                open_current_track_album(app);
+                return;
             }
             // Toolbar buttons (random / repeat / shuffle / add / remove)
             let tz = app.toolbar_hit_zones;
@@ -411,10 +411,8 @@ fn handle_sidebar_focus(app: &mut AppState, key: KeyEvent) -> bool {
     let total = library_len + app.sidebar_playlists.len();
     match key.code {
         KeyCode::Esc => app.focused_panel = FocusedPanel::Content,
-        KeyCode::Char('j') | KeyCode::Down => {
-            if total > 0 {
-                app.sidebar_cursor = (app.sidebar_cursor + 1).min(total - 1);
-            }
+        KeyCode::Char('j') | KeyCode::Down if total > 0 => {
+            app.sidebar_cursor = (app.sidebar_cursor + 1).min(total - 1);
         }
         KeyCode::Char('k') | KeyCode::Up => {
             app.sidebar_cursor = app.sidebar_cursor.saturating_sub(1);
@@ -505,15 +503,13 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Char('/') => {
             app.queue_filter_active = true;
         }
-        KeyCode::Char('j') | KeyCode::Down => {
-            if queue_len > 0 {
-                let next = app
-                    .right_panel_queue_state
-                    .selected()
-                    .map(|i| (i + 1).min(queue_len - 1))
-                    .unwrap_or(0);
-                app.right_panel_queue_state.select(Some(next));
-            }
+        KeyCode::Char('j') | KeyCode::Down if queue_len > 0 => {
+            let next = app
+                .right_panel_queue_state
+                .selected()
+                .map(|i| (i + 1).min(queue_len - 1))
+                .unwrap_or(0);
+            app.right_panel_queue_state.select(Some(next));
         }
         KeyCode::Char('k') | KeyCode::Up => {
             let prev = app
@@ -525,15 +521,11 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
                 app.right_panel_queue_state.select(Some(prev));
             }
         }
-        KeyCode::Char('g') => {
-            if queue_len > 0 {
-                app.right_panel_queue_state.select(Some(0));
-            }
+        KeyCode::Char('g') if queue_len > 0 => {
+            app.right_panel_queue_state.select(Some(0));
         }
-        KeyCode::Char('G') => {
-            if queue_len > 0 {
-                app.right_panel_queue_state.select(Some(queue_len - 1));
-            }
+        KeyCode::Char('G') if queue_len > 0 => {
+            app.right_panel_queue_state.select(Some(queue_len - 1));
         }
         KeyCode::Enter => {
             if let Some(idx) = app.right_panel_queue_state.selected() {
@@ -1326,15 +1318,13 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => app.show_playlist_selector = false,
-        KeyCode::Char('j') | KeyCode::Down => {
-            if len > 0 {
-                let n = app
-                    .playlist_selector_state
-                    .selected()
-                    .map(|i| (i + 1).min(len - 1))
-                    .unwrap_or(0);
-                app.playlist_selector_state.select(Some(n));
-            }
+        KeyCode::Char('j') | KeyCode::Down if len > 0 => {
+            let n = app
+                .playlist_selector_state
+                .selected()
+                .map(|i| (i + 1).min(len - 1))
+                .unwrap_or(0);
+            app.playlist_selector_state.select(Some(n));
         }
         KeyCode::Char('k') | KeyCode::Up => {
             let p = app

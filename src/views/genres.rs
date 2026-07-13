@@ -226,6 +226,7 @@ impl GenresState {
         has_pending
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_with_images(
         &mut self,
         frame: &mut Frame,

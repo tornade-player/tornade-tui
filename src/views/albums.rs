@@ -273,11 +273,7 @@ impl AlbumsState {
             self.selected = total - 1;
         }
 
-        let sel_row = if self.cols > 0 {
-            self.selected / self.cols
-        } else {
-            0
-        };
+        let sel_row = self.selected.checked_div(self.cols).unwrap_or(0);
         if sel_row < self.scroll_row {
             self.scroll_row = sel_row;
         } else if sel_row >= self.scroll_row + rows_visible {

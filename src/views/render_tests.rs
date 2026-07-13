@@ -9,6 +9,7 @@
 ///
 /// Run: cargo test render -- --nocapture
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use ratatui::{Terminal, backend::TestBackend, layout::Rect};
     use ratatui_image::picker::Picker;

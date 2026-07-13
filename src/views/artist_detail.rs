@@ -50,10 +50,10 @@ impl ArtistDetailState {
         if image_loading {
             let pending = Arc::clone(&pending_image);
             std::thread::spawn(move || {
-                if let Ok(img) = image::open(&photo_path) {
-                    if let Ok(mut guard) = pending.lock() {
-                        *guard = Some(img);
-                    }
+                if let Ok(img) = image::open(&photo_path)
+                    && let Ok(mut guard) = pending.lock()
+                {
+                    *guard = Some(img);
                 }
                 crate::wake::signal();
             });
@@ -115,14 +115,15 @@ impl ArtistDetailState {
         artwork: bool,
     ) -> bool {
         // Drain decoded image from background thread (skipped in text-only mode).
-        if artwork && self.image_loading && self.image_state.is_none() {
-            if let Ok(mut guard) = self.pending_image.try_lock() {
-                if let Some(img) = guard.take() {
-                    let rgba = image::DynamicImage::ImageRgba8(img.to_rgba8());
-                    self.image_state = Some(picker.new_resize_protocol(rgba));
-                    self.image_loading = false;
-                }
-            }
+        if artwork
+            && self.image_loading
+            && self.image_state.is_none()
+            && let Ok(mut guard) = self.pending_image.try_lock()
+            && let Some(img) = guard.take()
+        {
+            let rgba = image::DynamicImage::ImageRgba8(img.to_rgba8());
+            self.image_state = Some(picker.new_resize_protocol(rgba));
+            self.image_loading = false;
         }
 
         let has_pending = artwork && self.image_loading;
