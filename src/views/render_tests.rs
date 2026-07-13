@@ -27,7 +27,7 @@ mod tests {
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     fn dump_to_file(name: &str, content: &str) {
-        let path = format!("/tmp/tui_render_{}.txt", name);
+        let path = std::env::temp_dir().join(format!("tui_render_{name}.txt"));
         std::fs::write(&path, content).unwrap();
     }
 
