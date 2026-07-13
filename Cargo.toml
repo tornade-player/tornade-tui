@@ -14,10 +14,9 @@ ratatui-image = { version = "10.0.6", default-features = false, features = ["cro
 image = "~0.25"
 
 # Core library (standalone repo, consumed as a git dependency for CI).
-# NOTE: resolves only once the matching `012-tui-parity-phase2` branch is
-# pushed to origin. For local cross-repo iteration, temporarily switch to:
+# For local cross-repo iteration, temporarily switch to:
 #   tornade-core = { path = "../tornade-core" }
-tornade-core = { git = "https://github.com/tornade-player/tornade-core", branch = "012-tui-parity-phase2" }
+tornade-core = { git = "https://github.com/tornade-player/tornade-core", branch = "main" }
 
 # Standalone dependencies
 serde = { version = "1.0", features = ["derive"] }
