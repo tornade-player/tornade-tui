@@ -7,6 +7,7 @@ use ratatui::{
     widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
+use std::path::Path;
 use tornade_core::{
     models::{Album, Artist, Track},
     services::LibraryService,
@@ -23,7 +24,12 @@ pub struct AlbumDetailState {
 }
 
 impl AlbumDetailState {
-    pub fn new(album: Album, library: &LibraryService, picker: &mut Picker) -> Self {
+    pub fn new(
+        album: Album,
+        library: &LibraryService,
+        picker: &mut Picker,
+        tui_album_dir: &Path,
+    ) -> Self {
         let tracks = library.get_album_tracks(album.id).unwrap_or_default();
         let mut list_state = ListState::default();
         if !tracks.is_empty() {
@@ -33,8 +39,10 @@ impl AlbumDetailState {
         let image_state = album
             .online_artwork_path
             .as_ref()
-            .or(album.artwork_path.as_ref())
-            .and_then(|p| image::open(p).ok())
+            .map(|p| crate::tui_artwork::resolve_artwork_path(p, tui_album_dir))
+            .or_else(|| album.artwork_path.as_ref().cloned())
+            .and_then(|p| image::open(&p).ok())
+            .map(|img| image::DynamicImage::ImageRgba8(img.to_rgba8()))
             .map(|img| picker.new_resize_protocol(img));
 
         let artist_albums = library
@@ -52,6 +60,19 @@ impl AlbumDetailState {
             image_state,
             artist_albums,
             similar_artists,
+        }
+    }
+
+    /// Reload the album's tracks from the library (preserving selection).
+    /// Used to reflect tag edits without a rescan.
+    pub fn reload(&mut self, library: &LibraryService) {
+        let sel = self.list_state.selected();
+        self.tracks = library.get_album_tracks(self.album.id).unwrap_or_default();
+        if self.tracks.is_empty() {
+            self.list_state.select(None);
+        } else {
+            let idx = sel.unwrap_or(0).min(self.tracks.len() - 1);
+            self.list_state.select(Some(idx));
         }
     }
 
@@ -96,7 +117,13 @@ impl AlbumDetailState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        selection: &crate::app::Selection,
+    ) {
         // Layout: tracks + sections (left ~68%) | artwork + About (right ~32%)
         let right_w = (area.width * 32 / 100).clamp(24, 40);
         let h = Layout::default()
@@ -104,7 +131,7 @@ impl AlbumDetailState {
             .constraints([Constraint::Min(0), Constraint::Length(right_w)])
             .split(area);
 
-        self.render_right(frame, h[0], focused);
+        self.render_right(frame, h[0], focused, selection);
         self.render_left(frame, h[1]);
     }
 
@@ -130,7 +157,13 @@ impl AlbumDetailState {
         if img_h > 0
             && let Some(ref mut proto) = self.image_state
         {
-            frame.render_stateful_widget(StatefulImage::new(), v[0], proto);
+            frame.render_stateful_widget(
+                StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(
+                    image::imageops::FilterType::Triangle,
+                ))),
+                v[0],
+                proto,
+            );
         }
 
         // About section directly below artwork, no gap
@@ -160,11 +193,21 @@ impl AlbumDetailState {
         if let Some(ref c) = self.album.country.clone() {
             self.push_info_row(&mut lines, "Country", c);
         }
+        let feats = self.featuring_artists();
+        if !feats.is_empty() {
+            self.push_info_row(&mut lines, "Featuring", &feats.join(", "));
+        }
 
         frame.render_widget(Paragraph::new(lines), v[1]);
     }
 
-    fn render_right(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    fn render_right(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        selection: &crate::app::Selection,
+    ) {
         let year = self
             .album
             .year
@@ -195,14 +238,18 @@ impl AlbumDetailState {
             ])
             .split(area);
 
-        // Header: title + artist
+        // Header: title + artist (+ live selection count when in selection mode)
+        let mut title_spans = vec![Span::styled(
+            truncate(&header_text, (area.width as usize).saturating_sub(4)),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )];
+        if let Some(count) = crate::widgets::selection::count_span(selection) {
+            title_spans.push(count);
+        }
         let header = Paragraph::new(vec![
-            Line::from(Span::styled(
-                truncate(&header_text, (area.width as usize).saturating_sub(4)),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )),
+            Line::from(title_spans),
             Line::from(Span::styled(
                 truncate(
                     &self.album.artist_name,
@@ -215,7 +262,7 @@ impl AlbumDetailState {
         frame.render_widget(header, v[0]);
 
         // Tracks: 2 columns if wide enough, 1 column otherwise
-        self.render_tracks(frame, v[1], focused);
+        self.render_tracks(frame, v[1], focused, selection);
 
         // Albums by the artist
         if artist_albums_h > 0 {
@@ -228,7 +275,13 @@ impl AlbumDetailState {
         }
     }
 
-    fn render_tracks(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    fn render_tracks(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        selection: &crate::app::Selection,
+    ) {
         // Minimum width per column: num(4) + title(20) + dur(6) + rating(5) + sym(1) = ~36
         const MIN_COL_WIDTH: u16 = 36;
         let two_columns = area.width >= MIN_COL_WIDTH * 2;
@@ -256,11 +309,11 @@ impl AlbumDetailState {
 
             let left_items: Vec<ListItem> = self.tracks[..mid.min(self.tracks.len())]
                 .iter()
-                .map(|t| self.make_track_item(t, max_title))
+                .map(|t| self.make_track_item(t, max_title, selection))
                 .collect();
             let right_items: Vec<ListItem> = self.tracks[mid.min(self.tracks.len())..]
                 .iter()
-                .map(|t| self.make_track_item(t, max_title))
+                .map(|t| self.make_track_item(t, max_title, selection))
                 .collect();
 
             let selected = self.list_state.selected().unwrap_or(0);
@@ -293,7 +346,7 @@ impl AlbumDetailState {
             let items: Vec<ListItem> = self
                 .tracks
                 .iter()
-                .map(|t| self.make_track_item(t, max_title))
+                .map(|t| self.make_track_item(t, max_title, selection))
                 .collect();
             frame.render_stateful_widget(
                 List::new(items)
@@ -305,7 +358,12 @@ impl AlbumDetailState {
         }
     }
 
-    fn make_track_item(&self, t: &Track, max_title: usize) -> ListItem<'static> {
+    fn make_track_item(
+        &self,
+        t: &Track,
+        max_title: usize,
+        selection: &crate::app::Selection,
+    ) -> ListItem<'static> {
         let is_skipped = self.skipped_ids.contains(&t.id);
         let num = t
             .track_number
@@ -313,7 +371,11 @@ impl AlbumDetailState {
             .unwrap_or_else(|| "    ".to_string());
         let dur = format_duration(t.duration.as_secs());
         let rating = format_rating(t.rating.0);
-        let line = Line::from(vec![
+        let mut spans = Vec::new();
+        if let Some(marker) = crate::widgets::selection::marker_span(selection, t.id) {
+            spans.push(marker);
+        }
+        spans.extend([
             Span::styled(num, Style::default().fg(Color::DarkGray)),
             Span::raw(format!(
                 "{:<width$} ",
@@ -323,6 +385,7 @@ impl AlbumDetailState {
             Span::styled(format!("{:>5} ", dur), Style::default().fg(Color::DarkGray)),
             Span::styled(rating, Style::default().fg(Color::Yellow)),
         ]);
+        let line = Line::from(spans);
         let style = if is_skipped {
             Style::default().fg(Color::Red)
         } else {
@@ -406,6 +469,22 @@ impl AlbumDetailState {
         if self.album.country.is_some() {
             n += 1;
         }
+        if !self.featuring_artists().is_empty() {
+            n += 1;
+        }
         n
+    }
+
+    /// Guest artists appearing on the album's tracks other than the album artist.
+    fn featuring_artists(&self) -> Vec<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        for t in &self.tracks {
+            for name in &t.artist_names {
+                if name != &self.album.artist_name {
+                    seen.insert(name.clone());
+                }
+            }
+        }
+        seen.into_iter().collect()
     }
 }

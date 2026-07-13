@@ -77,6 +77,27 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 let _ = app.player.set_repeat(next);
                 return;
             }
+            // Click on the progress gauge: seek to that fraction of the track.
+            if let Some(pr) = zones.progress
+                && rect_contains(pr, col, row)
+            {
+                if let Some(track) = app.player_cache.current_track.as_ref() {
+                    let total = track.duration.as_secs_f64();
+                    if pr.width > 0 && total > 0.0 {
+                        let frac =
+                            (col.saturating_sub(pr.x) as f64 / pr.width as f64).clamp(0.0, 1.0);
+                        let _ = app.player.seek(Duration::from_secs_f64(frac * total));
+                    }
+                }
+                return;
+            }
+            // Click on the player artwork: open the current track's album.
+            if let Some(art) = zones.artwork
+                && rect_contains(art, col, row)
+            {
+                open_current_track_album(app);
+                return;
+            }
             // Toolbar buttons (random / repeat / shuffle / add / remove)
             let tz = app.toolbar_hit_zones;
             if tz
@@ -307,10 +328,37 @@ pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
 // ── Normal mode ──────────────────────────────────────────────────────────────
 
 fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
+    // US3 overlays sit ON TOP of the tag editor, so route to them first.
+    if app.scrape_picker.is_some() {
+        handle_scrape_picker(app, key);
+        return false;
+    }
+    if app.artwork_menu.is_some() {
+        handle_artwork_menu(app, key);
+        return false;
+    }
+
+    // Tag editor overlay: while open, route ALL keys to the editor and do NOT
+    // let them fall through to global handlers.
+    if app.tag_editor.is_some() {
+        handle_tag_editor(app, key);
+        return false;
+    }
+
     if app.show_help {
         if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
             app.show_help = false;
         }
+        return false;
+    }
+
+    if app.show_stats {
+        app.show_stats = false;
+        return false;
+    }
+
+    if app.show_prefs {
+        app.show_prefs = false;
         return false;
     }
 
@@ -363,10 +411,8 @@ fn handle_sidebar_focus(app: &mut AppState, key: KeyEvent) -> bool {
     let total = library_len + app.sidebar_playlists.len();
     match key.code {
         KeyCode::Esc => app.focused_panel = FocusedPanel::Content,
-        KeyCode::Char('j') | KeyCode::Down => {
-            if total > 0 {
-                app.sidebar_cursor = (app.sidebar_cursor + 1).min(total - 1);
-            }
+        KeyCode::Char('j') | KeyCode::Down if total > 0 => {
+            app.sidebar_cursor = (app.sidebar_cursor + 1).min(total - 1);
         }
         KeyCode::Char('k') | KeyCode::Up => {
             app.sidebar_cursor = app.sidebar_cursor.saturating_sub(1);
@@ -457,15 +503,13 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Char('/') => {
             app.queue_filter_active = true;
         }
-        KeyCode::Char('j') | KeyCode::Down => {
-            if queue_len > 0 {
-                let next = app
-                    .right_panel_queue_state
-                    .selected()
-                    .map(|i| (i + 1).min(queue_len - 1))
-                    .unwrap_or(0);
-                app.right_panel_queue_state.select(Some(next));
-            }
+        KeyCode::Char('j') | KeyCode::Down if queue_len > 0 => {
+            let next = app
+                .right_panel_queue_state
+                .selected()
+                .map(|i| (i + 1).min(queue_len - 1))
+                .unwrap_or(0);
+            app.right_panel_queue_state.select(Some(next));
         }
         KeyCode::Char('k') | KeyCode::Up => {
             let prev = app
@@ -477,15 +521,11 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
                 app.right_panel_queue_state.select(Some(prev));
             }
         }
-        KeyCode::Char('g') => {
-            if queue_len > 0 {
-                app.right_panel_queue_state.select(Some(0));
-            }
+        KeyCode::Char('g') if queue_len > 0 => {
+            app.right_panel_queue_state.select(Some(0));
         }
-        KeyCode::Char('G') => {
-            if queue_len > 0 {
-                app.right_panel_queue_state.select(Some(queue_len - 1));
-            }
+        KeyCode::Char('G') if queue_len > 0 => {
+            app.right_panel_queue_state.select(Some(queue_len - 1));
         }
         KeyCode::Enter => {
             if let Some(idx) = app.right_panel_queue_state.selected() {
@@ -564,12 +604,21 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         }
     }
 
+    // Esc first clears an active selection / exits selection mode (US2) instead
+    // of quitting or navigating back.
+    if key.code == KeyCode::Esc && (app.selection.selection_mode || app.selection.is_active()) {
+        app.selection.clear();
+        return false;
+    }
+
     match key.code {
         // ── Quit / back ──
         KeyCode::Char('q') | KeyCode::Esc => {
             if app.nav.is_root() {
                 return true;
             }
+            // Leaving a detail view clears any active selection (FR-016).
+            app.selection.clear();
             app.nav.pop();
         }
 
@@ -593,14 +642,35 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Cursor movement ──
         KeyCode::Char('j') | KeyCode::Down => move_down(app),
         KeyCode::Char('k') | KeyCode::Up => move_up(app),
-        KeyCode::Char('h') | KeyCode::Left if matches!(app.nav.current(), View::Albums(_)) => {
-            if let View::Albums(s) = app.nav.current_mut() {
-                s.move_left();
+        KeyCode::Char('h') | KeyCode::Left
+            if matches!(app.nav.current(), View::Albums(_) | View::Artists(_)) =>
+        {
+            match app.nav.current_mut() {
+                View::Albums(s) => s.move_left(),
+                View::Artists(s) => s.move_left(),
+                _ => {}
             }
         }
-        KeyCode::Char('l') | KeyCode::Right if matches!(app.nav.current(), View::Albums(_)) => {
-            if let View::Albums(s) = app.nav.current_mut() {
-                s.move_right();
+        KeyCode::Char('l') | KeyCode::Right
+            if matches!(app.nav.current(), View::Albums(_) | View::Artists(_)) =>
+        {
+            match app.nav.current_mut() {
+                View::Albums(s) => s.move_right(),
+                View::Artists(s) => s.move_right(),
+                _ => {}
+            }
+        }
+        KeyCode::Char('m')
+            if matches!(
+                app.nav.current(),
+                View::Albums(_) | View::Artists(_) | View::Genres(_)
+            ) =>
+        {
+            match app.nav.current_mut() {
+                View::Albums(s) => s.toggle_mode(),
+                View::Artists(s) => s.toggle_mode(),
+                View::Genres(s) => s.toggle_mode(),
+                _ => {}
             }
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => page_down(app),
@@ -611,8 +681,20 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Enter: open detail or play ──
         KeyCode::Enter => handle_enter(app),
 
+        // ── Multi-select (US2) ──
+        // `v` toggles selection mode for the current track list.
+        KeyCode::Char('v') => toggle_selection_mode(app),
+
         // ── Playback ──
-        KeyCode::Char(' ') => toggle_playback(app),
+        // Space marks/unmarks the highlighted track while in selection mode;
+        // otherwise it toggles playback (existing binding).
+        KeyCode::Char(' ') => {
+            if app.selection.selection_mode {
+                app.toggle_selection_at_cursor();
+            } else {
+                toggle_playback(app);
+            }
+        }
         KeyCode::Char('n') => {
             let _ = app.player.next();
         }
@@ -620,7 +702,14 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
             let _ = app.player.previous();
         }
         KeyCode::Char(']') => {
-            let _ = app.player.seek(Duration::from_secs(10));
+            let total = app
+                .player_cache
+                .current_track
+                .as_ref()
+                .map(|t| t.duration.as_secs_f64())
+                .unwrap_or(f64::MAX);
+            let pos = (app.player_cache.position + 10.0).min(total);
+            let _ = app.player.seek(Duration::from_secs_f64(pos));
         }
         KeyCode::Char('[') => {
             let _ = app.player.seek(Duration::from_secs_f64(
@@ -650,7 +739,15 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         }
 
         // ── Queue operations ──
-        KeyCode::Char('a') => app.add_selected_to_queue(),
+        // In selection mode `a` selects all in the current list; otherwise it
+        // adds the highlighted track to the queue (existing binding).
+        KeyCode::Char('a') => {
+            if app.selection.selection_mode {
+                app.select_all_current();
+            } else {
+                app.add_selected_to_queue();
+            }
+        }
         KeyCode::Char('x') => handle_remove_selected(app),
         KeyCode::Char('X') => {
             app.confirm = Some(ConfirmCtx {
@@ -663,11 +760,30 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Char('K') => handle_move_up_item(app),
 
         // ── Playlist operations ──
+        // `A` opens the playlist selector for the current selection (US2) or the
+        // highlighted track when no selection is active.
         KeyCode::Char('A') => show_playlist_selector(app),
-        KeyCode::Char('c') => handle_create_playlist(app),
+        // `D` (shift-d) removes the selected tracks from the current playlist.
+        KeyCode::Char('D') => app.remove_selection_from_playlist(),
+        // In selection mode `c` clears the selection; otherwise it creates a
+        // playlist (existing binding, only active in the Playlists view).
+        KeyCode::Char('c') => {
+            if app.selection.selection_mode {
+                app.selection.clear();
+            } else {
+                handle_create_playlist(app);
+            }
+        }
         KeyCode::Char('r') => handle_rename_playlist(app),
         KeyCode::Char('d') => handle_delete_playlist(app),
         KeyCode::Char('i') => handle_import_m3u(app),
+
+        // ── Tag editor ──
+        // `e` opens the tag editor for the highlighted track (single-track).
+        // TODO(US2): when multi-selection lands, `e` on an active selection
+        // should open the editor in album-level (multi-track) mode.
+        KeyCode::Char('e') => app.open_tag_editor(),
+        KeyCode::Char('o') => open_current_track_artist(app),
 
         // ── Library ──
         KeyCode::Char('s') => {
@@ -703,6 +819,31 @@ fn toggle_playback(app: &mut AppState) {
     }
 }
 
+/// Apply a hardware media-key event, reusing the same playback paths as the
+/// keyboard controls (feature 012, User Story 4).
+pub fn handle_media_key(app: &mut AppState, event: crate::media_keys::MediaKeyEvent) {
+    use crate::media_keys::MediaKeyEvent;
+    match event {
+        MediaKeyEvent::Toggle => toggle_playback(app),
+        MediaKeyEvent::Play => match app.player_cache.state {
+            PlaybackState::Paused => {
+                let _ = app.player.resume();
+            }
+            PlaybackState::Stopped => app.play_from_current_view(),
+            PlaybackState::Playing => {}
+        },
+        MediaKeyEvent::Pause => {
+            let _ = app.player.pause();
+        }
+        MediaKeyEvent::Next => {
+            let _ = app.player.next();
+        }
+        MediaKeyEvent::Previous => {
+            let _ = app.player.previous();
+        }
+    }
+}
+
 fn handle_enter(app: &mut AppState) {
     match app.nav.current() {
         View::Library(_)
@@ -728,9 +869,31 @@ fn push_album_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+        let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
         app.nav.push(View::AlbumDetail(state));
     }
+}
+
+/// Open the album-detail view for the currently playing track (used when the
+/// user clicks the player-bar artwork).
+fn open_current_track_album(app: &mut AppState) {
+    let album_id = match app
+        .player_cache
+        .current_track
+        .as_ref()
+        .and_then(|t| t.album_id)
+    {
+        Some(id) => id,
+        None => return,
+    };
+    let album = match app.library.get_album(album_id) {
+        Ok(Some(a)) => a,
+        _ => return,
+    };
+    let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+    let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
+    app.nav.push(View::AlbumDetail(state));
 }
 
 fn push_artist_detail(app: &mut AppState) {
@@ -739,7 +902,12 @@ fn push_artist_detail(app: &mut AppState) {
         _ => None,
     };
     if let Some(artist) = artist {
-        let photo_dir = app.paths.artist_photo_dir();
+        let tui_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
+        let photo_dir = if tui_dir.join(format!("{}.jpg", artist.id)).exists() {
+            tui_dir
+        } else {
+            app.paths.artist_photo_dir()
+        };
         let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
         app.nav.push(View::ArtistDetail(state));
     }
@@ -777,7 +945,8 @@ fn push_album_from_artist(app: &mut AppState) {
         _ => None,
     };
     if let Some(album) = album {
-        let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+        let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
         app.nav.push(View::AlbumDetail(state));
     }
 }
@@ -796,7 +965,8 @@ fn handle_search_enter(app: &mut AppState) {
         SearchSection::Tracks => app.play_from_current_view(),
         SearchSection::Albums => {
             if let Some(album) = album {
-                let state = AlbumDetailState::new(album, &app.library, &mut app.picker);
+                let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+                let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
                 app.nav.push(View::AlbumDetail(state));
             }
         }
@@ -1016,8 +1186,31 @@ fn reload_playlist_detail(app: &mut AppState, playlist_id: i64) {
 
 // ── Playlist management ──────────────────────────────────────────────────────
 
+/// Toggle multi-select mode. Turning it off clears the current selection.
+fn toggle_selection_mode(app: &mut AppState) {
+    if app.selection.selection_mode {
+        app.selection.clear();
+    } else {
+        // Only enable selection mode in views that expose a track list.
+        if app.current_visible_track_ids().is_empty()
+            && !matches!(app.nav.current(), View::Search(_))
+        {
+            return;
+        }
+        app.selection.selection_mode = true;
+        app.selection.selected_ids.clear();
+        app.selection.anchor = app.selected_track_index();
+        app.set_status(
+            "Selection mode: Space marks, a all, A add, Esc exits",
+            StatusKind::Info,
+        );
+    }
+}
+
 fn show_playlist_selector(app: &mut AppState) {
-    if app.selected_track_id().is_some() {
+    // Open the selector when there is either an active multi-selection or a
+    // highlighted track.
+    if app.selection.is_active() || app.selected_track_id().is_some() {
         app.show_playlist_selector = true;
         app.playlist_selector_state = ratatui::widgets::ListState::default();
         // Pre-load playlists
@@ -1125,15 +1318,13 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => app.show_playlist_selector = false,
-        KeyCode::Char('j') | KeyCode::Down => {
-            if len > 0 {
-                let n = app
-                    .playlist_selector_state
-                    .selected()
-                    .map(|i| (i + 1).min(len - 1))
-                    .unwrap_or(0);
-                app.playlist_selector_state.select(Some(n));
-            }
+        KeyCode::Char('j') | KeyCode::Down if len > 0 => {
+            let n = app
+                .playlist_selector_state
+                .selected()
+                .map(|i| (i + 1).min(len - 1))
+                .unwrap_or(0);
+            app.playlist_selector_state.select(Some(n));
         }
         KeyCode::Char('k') | KeyCode::Up => {
             let p = app
@@ -1146,12 +1337,16 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Enter => {
             if let Some(idx) = app.playlist_selector_state.selected()
                 && let Some(pl) = playlists.get(idx)
-                && let Some(track_id) = app.selected_track_id()
             {
                 let pid = pl.id;
-                match app.playlists.add_tracks(pid, vec![track_id]) {
-                    Ok(_) => app.set_status("Added to playlist", StatusKind::Success),
-                    Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+                if app.selection.is_active() {
+                    // Bulk: add the whole selection with a duplicate-safe count.
+                    app.add_selection_to_playlist(pid);
+                } else if let Some(track_id) = app.selected_track_id() {
+                    match app.playlists.add_tracks(pid, vec![track_id]) {
+                        Ok(_) => app.set_status("Added to playlist", StatusKind::Success),
+                        Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
+                    }
                 }
             }
             app.show_playlist_selector = false;
@@ -1159,6 +1354,166 @@ fn handle_playlist_selector(app: &mut AppState, key: KeyEvent) -> bool {
         _ => {}
     }
     false
+}
+
+// ── Tag editor overlay ───────────────────────────────────────────────────────
+
+fn handle_tag_editor(app: &mut AppState, key: KeyEvent) {
+    // Ctrl+F: fetch online metadata for the edited track (opens the scrape
+    // picker). Ctrl+I: open the artwork action menu. Modifiers are required so
+    // these do not collide with plain-char text entry into the fields.
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('f') => {
+                app.open_scrape_for_current_edit();
+                return;
+            }
+            KeyCode::Char('i') => {
+                app.open_artwork_menu();
+                return;
+            }
+            _ => {}
+        }
+    }
+    match key.code {
+        KeyCode::Esc => {
+            app.tag_editor = None;
+        }
+        KeyCode::Enter => app.save_tag_editor(),
+        KeyCode::Tab | KeyCode::Down => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.focus_next();
+            }
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.focus_prev();
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.backspace();
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(ed) = app.tag_editor.as_mut() {
+                ed.push_char(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Scrape picker overlay (US3) ──────────────────────────────────────────────
+
+fn handle_scrape_picker(app: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.scrape_picker = None;
+        }
+        KeyCode::Enter => app.apply_scrape_candidate(),
+        KeyCode::Up => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.prev_candidate();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.next_candidate();
+            }
+        }
+        KeyCode::Left => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.prev_field();
+            }
+        }
+        KeyCode::Right | KeyCode::Tab => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.next_field();
+            }
+        }
+        KeyCode::BackTab => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.prev_field();
+            }
+        }
+        KeyCode::Char(' ') => {
+            if let Some(p) = app.scrape_picker.as_mut() {
+                p.toggle_field();
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Artwork action menu overlay (US3) ────────────────────────────────────────
+
+fn handle_artwork_menu(app: &mut AppState, key: KeyEvent) {
+    use crate::widgets::artwork_menu::ArtworkAction;
+
+    match key.code {
+        KeyCode::Esc => {
+            app.artwork_menu = None;
+        }
+        KeyCode::Up => {
+            if let Some(m) = app.artwork_menu.as_mut() {
+                m.prev();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(m) = app.artwork_menu.as_mut() {
+                m.next();
+            }
+        }
+        KeyCode::Enter => {
+            let Some(menu) = app.artwork_menu.as_ref() else {
+                return;
+            };
+            let targets = menu.targets.clone();
+            match menu.selected() {
+                ArtworkAction::SetFromFile => {
+                    // Keep the menu open state cleared; prompt for a file path.
+                    app.artwork_menu = None;
+                    app.text_input = Some(TextInputCtx {
+                        prompt: "Image file path:".to_string(),
+                        value: String::new(),
+                        action: TextInputAction::SetArtworkFromFile { track_ids: targets },
+                    });
+                    app.input_mode = InputMode::TextInput;
+                }
+                ArtworkAction::FetchOnline => {
+                    // Derive album + artist from the first target's current tags.
+                    let (album, artist) = targets
+                        .first()
+                        .and_then(|&id| app.metadata_edit.current_track_update(id).ok())
+                        .map(|u| {
+                            (
+                                u.album_title.clone().unwrap_or_default(),
+                                u.album_artist_name
+                                    .clone()
+                                    .unwrap_or_else(|| u.artist_name.clone()),
+                            )
+                        })
+                        .unwrap_or_default();
+                    if album.is_empty() && artist.is_empty() {
+                        app.set_status("No album/artist to search artwork", StatusKind::Info);
+                        app.artwork_menu = None;
+                    } else {
+                        let _ = app.async_worker.submit(
+                            crate::async_worker::AsyncJob::FetchAlbumArtwork { album, artist },
+                        );
+                        app.set_status("Fetching artwork online…", StatusKind::Info);
+                        // Menu stays open so on_async_result can apply to its targets.
+                    }
+                }
+                ArtworkAction::Remove => {
+                    app.remove_artwork(&targets);
+                    app.artwork_menu = None;
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 // ── Command mode ─────────────────────────────────────────────────────────────
@@ -1274,6 +1629,47 @@ fn execute_command(app: &mut AppState, input: &str) {
                 app.set_status("Invalid seek position (use mm:ss)", StatusKind::Error);
             }
         }
+        Command::RateAlbum { stars } => app.rate_current_album(stars),
+        Command::QueueRandom { count } => app.add_random_to_queue(count),
+        Command::Export { path } => app.export_current_playlist(path),
+        Command::GoToArtist => open_current_track_artist(app),
+        Command::Stats => app.compute_stats(),
+        Command::Prefs => app.compute_prefs(),
+        Command::FetchArtwork => app.start_artwork_fetch(),
+        Command::ArtworkToggle { mode } => {
+            app.artwork_enabled = match mode.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => !app.artwork_enabled,
+            };
+            let state = if app.artwork_enabled { "on" } else { "off" };
+            app.set_status(format!("Artwork {state}"), StatusKind::Success);
+        }
+        Command::SourceAdd { path } => start_scan(app, path),
+        Command::SourceRemove { id } => app.remove_source(id),
+        Command::Refresh => {
+            app.reload_current_view();
+            app.set_status("Library refreshed", StatusKind::Success);
+        }
+        Command::Sort { field } => {
+            use crate::views::library::SortKey;
+            match SortKey::from_str(&field) {
+                Some(key) => {
+                    let sorted = if let View::Library(s) = app.nav.current_mut() {
+                        s.set_sort(key);
+                        true
+                    } else {
+                        false
+                    };
+                    if sorted {
+                        app.set_status(format!("Sorted by {}", key.label()), StatusKind::Success);
+                    } else {
+                        app.set_status("Sort works in the Tracks view", StatusKind::Error);
+                    }
+                }
+                None => app.set_status(format!("Unknown sort field: {field}"), StatusKind::Error),
+            }
+        }
         Command::Help => app.show_help = true,
         Command::Navigate(entry) => app.navigate_to(entry),
         Command::Unknown(msg) => {
@@ -1282,6 +1678,29 @@ fn execute_command(app: &mut AppState, input: &str) {
             }
         }
     }
+}
+
+/// Navigate to the artist of the currently highlighted track (`:artist` / `o`).
+fn open_current_track_artist(app: &mut AppState) {
+    let artist_id = app
+        .selected_track_id()
+        .and_then(|tid| app.library.get_track(tid).ok().flatten())
+        .map(|t| t.artist_id);
+    let Some(aid) = artist_id else {
+        app.set_status("No track selected", StatusKind::Error);
+        return;
+    };
+    let Ok(Some(artist)) = app.library.get_artist(aid) else {
+        return;
+    };
+    let tui_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
+    let photo_dir = if tui_dir.join(format!("{}.jpg", artist.id)).exists() {
+        tui_dir
+    } else {
+        app.paths.artist_photo_dir()
+    };
+    let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
+    app.nav.push(View::ArtistDetail(state));
 }
 
 fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
@@ -1299,6 +1718,12 @@ fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
                     StatusKind::Success,
                 );
                 app.reload_current_view();
+                // Generate TUI thumbnails for newly downloaded artwork in background
+                let paths_clone = app.paths.clone();
+                let tui_target = app.tui_target;
+                std::thread::spawn(move || {
+                    crate::tui_artwork::process_all_pending(&paths_clone, tui_target);
+                });
             }
             Err(e) => {
                 if let View::Scan(s) = app.nav.current_mut() {
@@ -1401,6 +1826,10 @@ fn execute_text_input(app: &mut AppState, action: TextInputAction, value: String
                     Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
                 }
             }
+        }
+        TextInputAction::SetArtworkFromFile { track_ids } => {
+            let path = expand_tilde(&value);
+            app.set_artwork_from_file(&track_ids, path);
         }
     }
 }

@@ -108,7 +108,11 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         frame,
         right_chunks[3],
         &app.player_cache,
-        app.player_artwork.as_mut(),
+        if app.artwork_enabled {
+            app.player_artwork.as_mut()
+        } else {
+            None
+        },
         album_name,
     );
 
@@ -119,38 +123,54 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
 /// Returns true when background image loads are still in progress (caller should redraw soon).
 fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
+    let tui_album_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+    let tui_artist_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
+    let selection = app.selection.clone();
+    let artwork = app.artwork_enabled;
     match app.nav.current_mut() {
         View::Library(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
-        View::Albums(s) => s.render(frame, area, focused, &mut app.picker),
-        View::Artists(s) => {
-            s.render(frame, area, focused);
-            false
-        }
-        View::Genres(s) => {
-            s.render(frame, area, focused);
-            false
-        }
+        View::Albums(s) => s.render(
+            frame,
+            area,
+            focused,
+            &mut app.picker,
+            &tui_album_dir,
+            artwork,
+        ),
+        View::Artists(s) => s.render(
+            frame,
+            area,
+            focused,
+            &mut app.picker,
+            &tui_artist_dir,
+            artwork,
+        ),
+        View::Genres(s) => s.render(
+            frame,
+            area,
+            focused,
+            &mut app.picker,
+            &tui_album_dir,
+            artwork,
+        ),
         View::Playlists(s) => {
             s.render(frame, area, focused);
             false
         }
         View::AlbumDetail(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
-        View::ArtistDetail(s) => {
-            s.render(frame, area, focused);
-            false
-        }
+        View::ArtistDetail(s) => s.render(frame, area, focused, &mut app.picker, artwork),
         View::GenreDetail(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::PlaylistDetail(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::Scan(s) => {
@@ -158,7 +178,7 @@ fn render_view(frame: &mut Frame, app: &mut AppState, area: Rect) -> bool {
             false
         }
         View::Search(s) => {
-            s.render(frame, area, focused);
+            s.render(frame, area, focused, &selection);
             false
         }
         View::Queue(s) => {
@@ -176,9 +196,18 @@ fn render_queue_view(frame: &mut Frame, app: &mut AppState, area: Rect) {
     let focused = matches!(app.focused_panel, FocusedPanel::Content);
     // Borrow cached_queue_tracks and nav as separate fields so the borrow checker is happy
     let tracks = &app.cached_queue_tracks;
+    let selection = app.selection.clone();
     if let View::Queue(s) = app.nav.current_mut() {
         s.sync_selection(tracks.len(), active_index);
-        s.render(frame, area, tracks, active_index, &skipped, focused);
+        s.render(
+            frame,
+            area,
+            tracks,
+            active_index,
+            &skipped,
+            focused,
+            &selection,
+        );
     }
 }
 
@@ -250,9 +279,30 @@ fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
         render_playlist_selector(frame, app, area);
     }
 
+    // Tag editor overlay
+    if let Some(ref editor) = app.tag_editor {
+        crate::widgets::tag_editor::render(frame, editor);
+    }
+
+    // US3 overlays sit on top of the tag editor.
+    if let Some(ref picker) = app.scrape_picker {
+        crate::widgets::scrape_picker::render(frame, picker);
+    }
+    if let Some(ref menu) = app.artwork_menu {
+        crate::widgets::artwork_menu::render(frame, menu);
+    }
+
     // Help overlay (always on top)
     if app.show_help {
         help_overlay::render(frame);
+    }
+
+    if app.show_stats {
+        crate::widgets::stats_overlay::render(frame, &app.stats_lines);
+    }
+
+    if app.show_prefs {
+        crate::widgets::stats_overlay::render_titled(frame, " Preferences ", &app.prefs_lines);
     }
 }
 

@@ -1,39 +1,45 @@
 use crate::utils::truncate;
-use image::Rgba;
+use crate::views::{ACTIVE_IMAGE_THREADS, MAX_IMAGE_THREADS};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tornade_core::{models::Album, services::LibraryService};
 
 // Image height in terminal rows (fixed); width is computed from font metrics to make it square
-const IMG_H: u16 = 8;
+const IMG_H: u16 = 12;
 // Text rows below the image
 const TEXT_H: u16 = 3;
 // Padding rows between image bottom and text
 const TEXT_PADDING: u16 = 1;
 // Gap between cells (cols/rows)
-const GAP_W: u16 = 3;
-const GAP_H: u16 = 2;
+const GAP_W: u16 = 2;
+const GAP_H: u16 = 1;
 // Left/right padding inside the grid area
 const GRID_PAD: u16 = 1;
-// Corner radius as fraction of the shorter image dimension
-const CORNER_RADIUS_FRAC: f32 = 0.12;
-
 /// Images decoded in background threads, waiting to be encoded by the picker on the main thread.
-type PendingQueue = Arc<Mutex<Vec<(i64, image::DynamicImage)>>>;
+/// None signals a failed load so the id is removed from loading_ids without caching.
+type PendingQueue = Arc<Mutex<Vec<(i64, Option<image::DynamicImage>)>>>;
+
+use crate::views::ViewMode;
 
 pub struct AlbumsState {
     pub albums: Vec<Album>,
     pub search_results: Option<Vec<Album>>,
     pub filter: String,
     pub filter_active: bool,
+    pub mode: ViewMode,
     pub selected: usize,
     pub scroll_row: usize,
     pub cols: usize,
@@ -47,6 +53,7 @@ pub struct AlbumsState {
     // Background loading
     pending_decoded: PendingQueue,
     loading_ids: HashSet<i64>,
+    failed_ids: HashSet<i64>,
 }
 
 impl Default for AlbumsState {
@@ -56,6 +63,7 @@ impl Default for AlbumsState {
             search_results: None,
             filter: String::new(),
             filter_active: false,
+            mode: ViewMode::default(),
             selected: 0,
             scroll_row: 0,
             cols: 4,
@@ -67,34 +75,9 @@ impl Default for AlbumsState {
             scrollbar_state: ScrollbarState::default(),
             pending_decoded: Arc::new(Mutex::new(Vec::new())),
             loading_ids: HashSet::new(),
+            failed_ids: HashSet::new(),
         }
     }
-}
-
-/// Apply rounded corners by zeroing alpha in corner regions.
-/// Called in background threads - operates on an already-resized image.
-fn apply_rounded_corners(img: image::DynamicImage) -> image::DynamicImage {
-    let (w, h) = (img.width(), img.height());
-    let mut rgba = img.into_rgba8();
-    let r = (w.min(h) as f32 * CORNER_RADIUS_FRAC).max(1.0);
-    let fw = w as f32;
-    let fh = h as f32;
-    for y in 0..h {
-        for x in 0..w {
-            let fx = x as f32;
-            let fy = y as f32;
-            let in_corner = (fx < r && fy < r && (fx - r).hypot(fy - r) > r)
-                || (fx > fw - r - 1.0 && fy < r && (fx - (fw - r - 1.0)).hypot(fy - r) > r)
-                || (fx < r && fy > fh - r - 1.0 && (fx - r).hypot(fy - (fh - r - 1.0)) > r)
-                || (fx > fw - r - 1.0
-                    && fy > fh - r - 1.0
-                    && (fx - (fw - r - 1.0)).hypot(fy - (fh - r - 1.0)) > r);
-            if in_corner {
-                rgba.put_pixel(x, y, Rgba([0, 0, 0, 0]));
-            }
-        }
-    }
-    image::DynamicImage::ImageRgba8(rgba)
 }
 
 impl AlbumsState {
@@ -183,6 +166,66 @@ impl AlbumsState {
         area: Rect,
         focused: bool,
         picker: &mut Picker,
+        tui_dir: &Path,
+        artwork: bool,
+    ) -> bool {
+        self.render_impl(frame, area, focused, picker, tui_dir, artwork)
+    }
+
+    /// Toggle between the compact list and the artwork grid.
+    pub fn toggle_mode(&mut self) {
+        self.mode = match self.mode {
+            ViewMode::List => ViewMode::Grid,
+            ViewMode::Grid => ViewMode::List,
+        };
+    }
+
+    /// Compact text list of albums (title / artist / year). No image decoding.
+    fn render_list(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        self.cols = 1; // one album per row → up/down navigation
+        let albums = self.display_albums();
+        let len = albums.len();
+        let items: Vec<ListItem> = albums
+            .iter()
+            .map(|a| {
+                let year = a.year.map(|y| y.to_string()).unwrap_or_default();
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:<42} ", truncate(&a.title, 41))),
+                    Span::styled(
+                        format!("{:<28} ", truncate(&a.artist_name, 27)),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(year, Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect();
+        let hl = if focused {
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        let mut ls = ListState::default();
+        if len > 0 {
+            ls.select(Some(self.selected.min(len - 1)));
+        }
+        frame.render_stateful_widget(
+            List::new(items).highlight_style(hl).highlight_symbol("> "),
+            area,
+            &mut ls,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_impl(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        picker: &mut Picker,
+        tui_dir: &Path,
+        artwork: bool,
     ) -> bool {
         let chunks = Layout::vertical([
             Constraint::Length(1),
@@ -193,14 +236,24 @@ impl AlbumsState {
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
         let area = chunks[2];
 
-        // Compute square image dimensions from font metrics
+        // List mode: compact text rows, no artwork decoding at all.
+        if self.mode == ViewMode::List {
+            self.render_list(frame, area, focused);
+            return false;
+        }
+
+        // Width in columns that makes the image square in *pixels* for the
+        // current font cell aspect: img_cols * font_w ≈ IMG_H * font_h. Keeping
+        // this exact is what lets the (square) thumbnail fill the cell instead of
+        // being letterboxed; a hard minimum wider than this would reintroduce a
+        // gap, so only clamp to a small floor.
         let font = picker.font_size();
         self.img_cols = if font.0 > 0 {
             ((IMG_H as u32 * font.1 as u32) / font.0 as u32) as u16
         } else {
             IMG_H
         };
-        self.img_cols = self.img_cols.max(14);
+        self.img_cols = self.img_cols.max(6);
 
         self.cell_stride_w = self.img_cols + GAP_W;
         self.cell_stride_h = IMG_H + TEXT_PADDING + TEXT_H + GAP_H;
@@ -220,11 +273,7 @@ impl AlbumsState {
             self.selected = total - 1;
         }
 
-        let sel_row = if self.cols > 0 {
-            self.selected / self.cols
-        } else {
-            0
-        };
+        let sel_row = self.selected.checked_div(self.cols).unwrap_or(0);
         if sel_row < self.scroll_row {
             self.scroll_row = sel_row;
         } else if sel_row >= self.scroll_row + rows_visible {
@@ -264,53 +313,71 @@ impl AlbumsState {
                 .collect()
         };
 
-        // 1. Drain images decoded by background threads → encode into StatefulProtocol
-        //    (picker.new_resize_protocol must run on the main thread)
-        {
-            if let Ok(mut pending) = self.pending_decoded.try_lock() {
-                for (id, img) in pending.drain(..) {
-                    self.loading_ids.remove(&id);
-                    self.image_cache.insert(id, picker.new_resize_protocol(img));
+        // 1. Drain up to 3 images per frame from background threads → encode into
+        //    StatefulProtocol. Rate-limited to keep the UI responsive (encoding is
+        //    CPU-intensive). Remaining images are picked up on the next 30ms redraw.
+        if let Ok(mut pending) = self.pending_decoded.try_lock() {
+            let mut encoded = 0u32;
+            pending.retain(|(id, result)| {
+                if encoded >= 3 {
+                    return true; // keep for next frame
+                }
+                self.loading_ids.remove(id);
+                if let Some(img) = result {
+                    self.image_cache
+                        .insert(*id, picker.new_resize_protocol(img.clone()));
+                } else {
+                    self.failed_ids.insert(*id);
+                }
+                encoded += 1;
+                false // remove from pending
+            });
+        }
+
+        // 2. Spawn background threads for visible images not yet in cache or loading.
+        //    Thumbnails are pre-sized at target resolution, just load from disk.
+        //    Skipped entirely in text-only mode (`:artwork off`).
+        if artwork {
+            for (_, id, _, _, _, online, local) in &visible {
+                if ACTIVE_IMAGE_THREADS.load(Ordering::Relaxed) >= MAX_IMAGE_THREADS {
+                    break;
+                }
+                if self.image_cache.contains_key(id)
+                    || self.loading_ids.contains(id)
+                    || self.failed_ids.contains(id)
+                {
+                    continue;
+                }
+                let path = online
+                    .as_ref()
+                    .map(|p| crate::tui_artwork::resolve_artwork_path(p, tui_dir))
+                    .or_else(|| local.as_ref().cloned());
+                if let Some(path) = path {
+                    self.loading_ids.insert(*id);
+                    ACTIVE_IMAGE_THREADS.fetch_add(1, Ordering::Relaxed);
+                    let id = *id;
+                    let pending = Arc::clone(&self.pending_decoded);
+                    std::thread::spawn(move || {
+                        let result = image::open(&path).ok();
+                        if let Ok(mut guard) = pending.lock() {
+                            guard.push((id, result));
+                        }
+                        ACTIVE_IMAGE_THREADS.fetch_sub(1, Ordering::Relaxed);
+                        crate::wake::signal();
+                    });
                 }
             }
         }
 
-        // 2. Spawn background threads for visible images not yet in cache or loading
-        let (fw, fh) = (font.0, font.1);
-        let target_px_w = (self.img_cols as u32) * (fw as u32);
-        let target_px_h = (IMG_H as u32) * (fh as u32);
-        for (_, id, _, _, _, online, local) in &visible {
-            if self.image_cache.contains_key(id) || self.loading_ids.contains(id) {
-                continue;
-            }
-            let path = online.as_ref().or(local.as_ref()).cloned();
-            if let Some(path) = path {
-                self.loading_ids.insert(*id);
-                let id = *id;
-                let pending = Arc::clone(&self.pending_decoded);
-                std::thread::spawn(move || {
-                    if let Ok(img) = image::open(&path) {
-                        let img = img.resize_to_fill(
-                            target_px_w.max(1),
-                            target_px_h.max(1),
-                            image::imageops::FilterType::Triangle,
-                        );
-                        let img = apply_rounded_corners(img);
-                        if let Ok(mut guard) = pending.lock() {
-                            guard.push((id, img));
-                        }
-                    }
-                });
-            }
-        }
-
-        // Whether any images are still pending (loading or waiting to be encoded)
-        let has_pending = !self.loading_ids.is_empty()
-            || self
-                .pending_decoded
-                .try_lock()
-                .map(|g| !g.is_empty())
-                .unwrap_or(true);
+        // Whether any images are still pending (loading or waiting to be encoded).
+        // Always false in text-only mode so the redraw loop stays at idle cadence.
+        let has_pending = artwork
+            && (!self.loading_ids.is_empty()
+                || self
+                    .pending_decoded
+                    .try_lock()
+                    .map(|g| !g.is_empty())
+                    .unwrap_or(true));
 
         let img_cols = self.img_cols;
         let cell_stride_w = self.cell_stride_w;
@@ -340,7 +407,11 @@ impl AlbumsState {
             };
 
             let is_sel = *flat_idx == self.selected;
-            let protocol = self.image_cache.get_mut(id);
+            let protocol = if artwork {
+                self.image_cache.get_mut(id)
+            } else {
+                None
+            };
             render_cell(
                 frame, cell_rect, title, artist, *year, is_sel, focused, protocol, img_cols,
             );
@@ -393,6 +464,9 @@ fn render_cell(
 
     if let Some(proto) = protocol {
         frame.render_stateful_widget(
+            // Crop fills the whole cell (covers) instead of letterboxing a
+            // smaller image inside it — thumbnails are supersampled so there is
+            // enough resolution and the crop of a square cover is negligible.
             StatefulImage::new().resize(Resize::Crop(None)),
             img_rect,
             proto,

@@ -1,5 +1,5 @@
 use crate::utils::truncate;
-use image::{DynamicImage, Rgba};
+use image::DynamicImage;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -12,6 +12,7 @@ use ratatui::{
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use tornade_core::{
     models::{Album, Artist},
     services::LibraryService,
@@ -20,58 +21,52 @@ use tornade_core::{
 pub struct ArtistDetailState {
     pub artist: Artist,
     pub albums: Vec<Album>,
+    pub related: Vec<Artist>,
     pub list_state: ListState,
     image_state: Option<StatefulProtocol>,
+    pending_image: Arc<Mutex<Option<DynamicImage>>>,
+    image_loading: bool,
     scrollbar_state: ScrollbarState,
-}
-
-/// Apply a circular mask to an image (pixels outside the circle become transparent).
-fn apply_circle_mask(img: DynamicImage) -> DynamicImage {
-    let (w, h) = (img.width(), img.height());
-    let mut rgba = img.into_rgba8();
-    let cx = w as f32 / 2.0;
-    let cy = h as f32 / 2.0;
-    let r = cx.min(cy);
-    for y in 0..h {
-        for x in 0..w {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            if (dx * dx + dy * dy).sqrt() > r {
-                rgba.put_pixel(x, y, Rgba([0, 0, 0, 0]));
-            }
-        }
-    }
-    DynamicImage::ImageRgba8(rgba)
 }
 
 impl ArtistDetailState {
     pub fn new(
         artist: Artist,
         library: &LibraryService,
-        picker: &mut Picker,
+        _picker: &mut Picker,
         photo_dir: &Path,
     ) -> Self {
         let albums = library.get_artist_albums(artist.id).unwrap_or_default();
+        let related = library.get_similar_artists(artist.id).unwrap_or_default();
         let mut list_state = ListState::default();
         if !albums.is_empty() {
             list_state.select(Some(0));
         }
 
+        let pending_image: Arc<Mutex<Option<DynamicImage>>> = Arc::new(Mutex::new(None));
         let photo_path = photo_dir.join(format!("{}.jpg", artist.id));
-        let image_state = if photo_path.exists() {
-            image::open(&photo_path)
-                .ok()
-                .map(apply_circle_mask)
-                .map(|img| picker.new_resize_protocol(img))
-        } else {
-            None
-        };
+        let image_loading = photo_path.exists();
+
+        if image_loading {
+            let pending = Arc::clone(&pending_image);
+            std::thread::spawn(move || {
+                if let Ok(img) = image::open(&photo_path)
+                    && let Ok(mut guard) = pending.lock()
+                {
+                    *guard = Some(img);
+                }
+                crate::wake::signal();
+            });
+        }
 
         Self {
             artist,
             albums,
+            related,
             list_state,
-            image_state,
+            image_state: None,
+            pending_image,
+            image_loading,
             scrollbar_state: ScrollbarState::default(),
         }
     }
@@ -111,23 +106,76 @@ impl ArtistDetailState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
-        let header_height = if self.image_state.is_some() { 10 } else { 4 };
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        picker: &mut Picker,
+        artwork: bool,
+    ) -> bool {
+        // Drain decoded image from background thread (skipped in text-only mode).
+        if artwork
+            && self.image_loading
+            && self.image_state.is_none()
+            && let Ok(mut guard) = self.pending_image.try_lock()
+            && let Some(img) = guard.take()
+        {
+            let rgba = image::DynamicImage::ImageRgba8(img.to_rgba8());
+            self.image_state = Some(picker.new_resize_protocol(rgba));
+            self.image_loading = false;
+        }
+
+        let has_pending = artwork && self.image_loading;
+
+        let show_image = artwork && self.image_state.is_some();
+        let header_height = if show_image { 10 } else { 4 };
+        let related_height: u16 = if self.related.is_empty() { 0 } else { 2 };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(header_height), Constraint::Min(0)])
+            .constraints([
+                Constraint::Length(header_height),
+                Constraint::Min(0),
+                Constraint::Length(related_height),
+            ])
             .split(area);
 
-        self.render_header(frame, chunks[0]);
+        self.render_header(frame, chunks[0], show_image);
+
+        // Related artists (same-genre) footer.
+        if related_height > 0 {
+            let names: Vec<String> = self
+                .related
+                .iter()
+                .take(6)
+                .map(|a| a.name.clone())
+                .collect();
+            let line = Line::from(vec![
+                Span::styled("Related: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(names.join("  ·  "), Style::default().fg(Color::Cyan)),
+            ]);
+            frame.render_widget(Paragraph::new(line), chunks[2]);
+        }
 
         let items: Vec<ListItem> = self
             .albums
             .iter()
             .map(|a| {
                 let year = a.year.map(|y| format!("  {}", y)).unwrap_or_default();
+                // Badge singles / EPs so they are distinguishable from albums.
+                let badge = a
+                    .album_type
+                    .as_deref()
+                    .filter(|t| {
+                        let t = t.to_lowercase();
+                        t == "single" || t == "ep"
+                    })
+                    .map(|t| format!("  [{t}]"))
+                    .unwrap_or_default();
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{:<45} ", truncate(&a.title, 44))),
                     Span::styled(year, Style::default().fg(Color::DarkGray)),
+                    Span::styled(badge, Style::default().fg(Color::Yellow)),
                 ]))
             })
             .collect();
@@ -155,10 +203,24 @@ impl ArtistDetailState {
             chunks[1],
             &mut self.scrollbar_state,
         );
+
+        has_pending
     }
 
-    fn render_header(&mut self, frame: &mut Frame, area: Rect) {
-        if let Some(ref mut protocol) = self.image_state {
+    /// One-line "about" summary from formed year and country, if available.
+    fn about_summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(y) = self.artist.formed_year {
+            parts.push(format!("Formed {y}"));
+        }
+        if let Some(ref c) = self.artist.country {
+            parts.push(c.clone());
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
+    fn render_header(&mut self, frame: &mut Frame, area: Rect, show_image: bool) {
+        if let Some(protocol) = self.image_state.as_mut().filter(|_| show_image) {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(20), Constraint::Min(0)])
@@ -166,12 +228,14 @@ impl ArtistDetailState {
 
             // Circle image - rendered directly, no border
             frame.render_stateful_widget(
-                StatefulImage::new().resize(ratatui_image::Resize::Fit(None)),
+                StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(
+                    image::imageops::FilterType::Triangle,
+                ))),
                 h_chunks[0],
                 protocol,
             );
 
-            let meta = Paragraph::new(vec![
+            let mut meta_lines = vec![
                 Line::from(Span::styled(
                     truncate(&self.artist.name, 50),
                     Style::default()
@@ -182,8 +246,20 @@ impl ArtistDetailState {
                     format!("{} albums", self.albums.len()),
                     Style::default().fg(Color::DarkGray),
                 )),
-            ])
-            .block(Block::default());
+            ];
+            if let Some(about) = self.about_summary() {
+                meta_lines.push(Line::from(Span::styled(
+                    about,
+                    Style::default().fg(Color::Gray),
+                )));
+            }
+            if let Some(ref bio) = self.artist.bio {
+                meta_lines.push(Line::from(Span::styled(
+                    truncate(bio, 60),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            let meta = Paragraph::new(meta_lines).block(Block::default());
             frame.render_widget(meta, h_chunks[1]);
         } else {
             let header = Paragraph::new(vec![

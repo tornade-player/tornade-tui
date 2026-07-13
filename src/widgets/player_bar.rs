@@ -21,6 +21,10 @@ pub struct PlayerHitZones {
     pub next: Option<Rect>,
     pub shuffle: Option<Rect>,
     pub repeat: Option<Rect>,
+    /// Progress gauge area; clicking within it seeks to that fraction.
+    pub progress: Option<Rect>,
+    /// Player artwork area; clicking it opens the current track's album.
+    pub artwork: Option<Rect>,
 }
 
 /// Full player panel: artwork | info | volume (top) + controls+progress (bottom row).
@@ -50,7 +54,13 @@ pub fn render(
 
     // Artwork
     if let Some(proto) = image_state {
-        frame.render_stateful_widget(StatefulImage::new(), top[0], proto);
+        frame.render_stateful_widget(
+            StatefulImage::new().resize(ratatui_image::Resize::Fit(Some(
+                image::imageops::FilterType::Triangle,
+            ))),
+            top[0],
+            proto,
+        );
     } else {
         frame.render_widget(
             Block::default().style(Style::default().bg(Color::Rgb(35, 37, 48))),
@@ -193,6 +203,8 @@ pub fn render(
         next: Some(transport[2]),
         shuffle: None,
         repeat: None,
+        progress: Some(bottom[3]),
+        artwork: Some(top[0]),
     }
 }
 

@@ -9,7 +9,7 @@ A terminal UI music player built on [tornade-core](https://github.com/tornade-pl
 
 ## Features
 
-- **Albums grid** with inline artwork (Kitty, Ghostty, iTerm2, WezTerm; text fallback elsewhere)
+- **Albums grid** with inline artwork (Kitty, Sixel, iTerm2; halfblocks fallback - see [Image Rendering](#image-rendering))
 - **Library views**: Tracks, Albums, Artists, Genres, Playlists, Queue, Search
 - **Detail views**: album tracklist, artist albums, genre tracks, playlist editor
 - **Player bar**: artwork, transport controls, progress bar, volume, shuffle and repeat indicators
@@ -19,6 +19,10 @@ A terminal UI music player built on [tornade-core](https://github.com/tornade-pl
 - **Per-view filter**: press `/` in any list to narrow results in real time
 - **Command mode**: press `:` to run commands with autocompletion
 - **Track ratings**: press `0`-`5` to set star rating; displayed in all track lists
+- **Tag editing**: press `e` to edit title, artist, album, album artist, year, genre and track number for one track, or album-level fields across a multi-track selection; written to the file and database
+- **Online metadata & artwork**: fetch MusicBrainz suggestions (`Ctrl+F`) and manage cover art (`Ctrl+I`: set from file, fetch online, remove)
+- **Multi-select**: press `v` to select multiple tracks and add/remove them to/from playlists in bulk (duplicate-safe)
+- **Hardware media keys**: play/pause, next, previous on macOS, Windows, and Linux, with now-playing info published to the OS
 - **Library scanning** with progress view
 - **Mouse support**: sidebar, track list, queue, and player controls
 - Built with [ratatui](https://github.com/ratatui-org/ratatui)
@@ -114,6 +118,26 @@ Press `:` to open the command bar. Press `Tab` to autocomplete, `Esc` to cancel.
 | `:playlist add <name>` | Add selected track to a playlist |
 | `:seek <mm:ss>` | Seek to position |
 | `:help` | Show help overlay |
+
+## Image Rendering
+
+Album and artist artwork is displayed inline using [ratatui-image](https://github.com/benjajaja/ratatui-image).
+
+**TUI thumbnails**: at startup and after each scan, a background thread generates 128x128 JPEG (quality 45) thumbnails in `~/.config/tornade/assets/tui/{albums,artists}/`. This reduces memory and CPU usage vs loading full-size artwork (~13x smaller files).
+
+**Protocol detection**: `ratatui-image` auto-detects the best image protocol for your terminal (Kitty, Sixel, iTerm2, or halfblocks fallback).
+
+### Known issue: Ghostty + ratatui-image v10
+
+`ratatui-image` v10 detects Sixel on Ghostty, but Sixel rendering fails. Kitty protocol also fails because v10 uses [Unicode placeholders](https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders) (`U=1`), which Ghostty does not support.
+
+**Current workaround**: tornade-tui forces halfblocks on Ghostty (lower resolution, but functional). This is detected via `TERM_PROGRAM=ghostty`.
+
+**Upstream tracking**:
+- ratatui-image: needs direct Kitty placement mode (without `U=1`) as alternative
+- Ghostty: needs Unicode placeholder support for Kitty graphics protocol
+
+If a future version of ratatui-image or Ghostty resolves this, remove the Ghostty override in `src/main.rs`.
 
 ## Related Projects
 

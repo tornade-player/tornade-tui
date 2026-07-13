@@ -9,12 +9,24 @@ pub enum Command {
     Scan { path: PathBuf },
     Cleanup,
     Rate { stars: u8 },
+    RateAlbum { stars: u8 },
     QueueAdd,
     QueueClear,
+    QueueRandom { count: usize },
     PlaylistCreate { name: String },
     PlaylistDelete { name: String },
     PlaylistAdd { name: String },
     Import { path: PathBuf },
+    Export { path: PathBuf },
+    GoToArtist,
+    Refresh,
+    Stats,
+    Prefs,
+    FetchArtwork,
+    ArtworkToggle { mode: String },
+    SourceAdd { path: PathBuf },
+    SourceRemove { id: i64 },
+    Sort { field: String },
     Seek { position_str: String },
     Help,
     Navigate(SidebarEntry),
@@ -37,23 +49,54 @@ impl Command {
         match cmd.to_lowercase().as_str() {
             "scan" => {
                 if rest.is_empty() {
-                    Self::Unknown("scan requires a path: :scan <path>".to_string())
+                    Self::Unknown(
+                        "scan requires a path: :scan <path|music|downloads|documents|desktop>"
+                            .to_string(),
+                    )
                 } else {
+                    // Quick-access presets expand to the matching home folder.
+                    let preset = match rest.to_lowercase().as_str() {
+                        "music" => Some("~/Music"),
+                        "downloads" => Some("~/Downloads"),
+                        "documents" => Some("~/Documents"),
+                        "desktop" => Some("~/Desktop"),
+                        _ => None,
+                    };
                     Self::Scan {
-                        path: expand_tilde(rest),
+                        path: expand_tilde(preset.unwrap_or(rest)),
                     }
                 }
             }
             "cleanup" => Self::Cleanup,
-            "rate" => match rest.parse::<u8>() {
-                Ok(n) if n <= 5 => Self::Rate { stars: n },
-                _ => Self::Unknown("rate requires 0-5: :rate <0-5>".to_string()),
-            },
-            "queue" => match rest.to_lowercase().as_str() {
-                "add" => Self::QueueAdd,
-                "clear" => Self::QueueClear,
-                _ => Self::Navigate(SidebarEntry::Queue),
-            },
+            "rate" => {
+                let lower = rest.to_lowercase();
+                if let Some(n) = lower.strip_prefix("album").map(str::trim) {
+                    match n.parse::<u8>() {
+                        Ok(n) if n <= 5 => Self::RateAlbum { stars: n },
+                        _ => {
+                            Self::Unknown("rate album requires 0-5: :rate album <0-5>".to_string())
+                        }
+                    }
+                } else {
+                    match rest.parse::<u8>() {
+                        Ok(n) if n <= 5 => Self::Rate { stars: n },
+                        _ => Self::Unknown("rate requires 0-5: :rate <0-5>".to_string()),
+                    }
+                }
+            }
+            "queue" => {
+                let lower = rest.to_lowercase();
+                if let Some(n) = lower.strip_prefix("random").map(str::trim) {
+                    let count = n.parse::<usize>().unwrap_or(20).clamp(1, 500);
+                    Self::QueueRandom { count }
+                } else {
+                    match lower.as_str() {
+                        "add" => Self::QueueAdd,
+                        "clear" => Self::QueueClear,
+                        _ => Self::Navigate(SidebarEntry::Queue),
+                    }
+                }
+            }
             "playlist" => {
                 let (subcmd, name) = rest.split_once(' ').unwrap_or((rest, ""));
                 match subcmd.to_lowercase().as_str() {
@@ -75,6 +118,51 @@ impl Command {
                 } else {
                     Self::Import {
                         path: expand_tilde(rest),
+                    }
+                }
+            }
+            "export" => {
+                if rest.is_empty() {
+                    Self::Unknown("export requires a path: :export <path>".to_string())
+                } else {
+                    Self::Export {
+                        path: expand_tilde(rest),
+                    }
+                }
+            }
+            "artist" => Self::GoToArtist,
+            "refresh" => Self::Refresh,
+            "stats" => Self::Stats,
+            "fetchart" => Self::FetchArtwork,
+            "artwork" => Self::ArtworkToggle {
+                mode: rest.to_lowercase(),
+            },
+            "source" => {
+                let (subcmd, arg) = rest.split_once(' ').unwrap_or((rest, ""));
+                match subcmd.to_lowercase().as_str() {
+                    "add" if !arg.is_empty() => Self::SourceAdd {
+                        path: expand_tilde(arg),
+                    },
+                    "remove" | "rm" => match arg.trim().parse::<i64>() {
+                        Ok(id) => Self::SourceRemove { id },
+                        _ => Self::Unknown(
+                            "source remove needs an id: :source remove <id>".to_string(),
+                        ),
+                    },
+                    _ => {
+                        Self::Unknown("usage: :source add <path> | :source remove <id>".to_string())
+                    }
+                }
+            }
+            "prefs" | "preferences" | "settings" => Self::Prefs,
+            "sort" => {
+                if rest.is_empty() {
+                    Self::Unknown(
+                        "sort <title|artist|duration|rating|plays|lastplayed>".to_string(),
+                    )
+                } else {
+                    Self::Sort {
+                        field: rest.to_string(),
                     }
                 }
             }
@@ -195,6 +283,69 @@ mod tests {
         assert!(matches!(
             Command::parse("import /path/to/file.m3u"),
             Command::Import { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_export() {
+        assert!(matches!(
+            Command::parse("export ~/mix.m3u"),
+            Command::Export { .. }
+        ));
+        assert!(matches!(Command::parse("export"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parse_rate_album() {
+        assert_eq!(
+            Command::parse("rate album 4"),
+            Command::RateAlbum { stars: 4 }
+        );
+        assert!(matches!(
+            Command::parse("rate album 9"),
+            Command::Unknown(_)
+        ));
+    }
+
+    #[test]
+    fn parse_queue_random() {
+        assert_eq!(
+            Command::parse("queue random 10"),
+            Command::QueueRandom { count: 10 }
+        );
+        assert_eq!(
+            Command::parse("queue random"),
+            Command::QueueRandom { count: 20 }
+        );
+    }
+
+    #[test]
+    fn parse_go_to_artist() {
+        assert_eq!(Command::parse("artist"), Command::GoToArtist);
+    }
+
+    #[test]
+    fn parse_stats() {
+        assert_eq!(Command::parse("stats"), Command::Stats);
+    }
+
+    #[test]
+    fn parse_sort() {
+        assert_eq!(
+            Command::parse("sort artist"),
+            Command::Sort {
+                field: "artist".to_string()
+            }
+        );
+        assert!(matches!(Command::parse("sort"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parse_scan_preset() {
+        assert!(matches!(Command::parse("scan music"), Command::Scan { .. }));
+        assert!(matches!(
+            Command::parse("scan downloads"),
+            Command::Scan { .. }
         ));
     }
 }

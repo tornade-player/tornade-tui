@@ -160,7 +160,13 @@ impl SearchState {
             .and_then(|i| self.artists.get(i))
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        selection: &crate::app::Selection,
+    ) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -171,16 +177,35 @@ impl SearchState {
             ])
             .split(area);
 
-        let query_bar = Paragraph::new(Line::from(vec![
+        let mut query_spans = vec![
             Span::styled("Search: ", Style::default().fg(Color::Cyan)),
-            Span::raw(&self.query),
-        ]))
-        .block(Block::default());
+            Span::raw(self.query.clone()),
+        ];
+        if let Some(count) = crate::widgets::selection::count_span(selection) {
+            query_spans.push(count);
+        }
+        let query_bar = Paragraph::new(Line::from(query_spans)).block(Block::default());
         frame.render_widget(query_bar, chunks[0]);
 
-        self.render_section(frame, chunks[1], SearchSection::Tracks, focused);
-        self.render_section(frame, chunks[2], SearchSection::Albums, focused);
-        self.render_section(frame, chunks[3], SearchSection::Artists, focused);
+        // Empty states: nothing typed yet, or a query with no matches.
+        let no_results =
+            self.tracks.is_empty() && self.albums.is_empty() && self.artists.is_empty();
+        if self.query.is_empty() || no_results {
+            let msg = if self.query.is_empty() {
+                "Type to search tracks, albums and artists.".to_string()
+            } else {
+                format!("No results for \"{}\".", self.query)
+            };
+            let para = Paragraph::new(msg)
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(ratatui::layout::Alignment::Center);
+            frame.render_widget(para, chunks[1]);
+            return;
+        }
+
+        self.render_section(frame, chunks[1], SearchSection::Tracks, focused, selection);
+        self.render_section(frame, chunks[2], SearchSection::Albums, focused, selection);
+        self.render_section(frame, chunks[3], SearchSection::Artists, focused, selection);
     }
 
     fn render_section(
@@ -189,6 +214,7 @@ impl SearchState {
         area: Rect,
         section: SearchSection,
         focused: bool,
+        selection: &crate::app::Selection,
     ) {
         let is_active = self.section == section;
         let (hl_style, hl_sym) = if focused && is_active {
@@ -208,14 +234,21 @@ impl SearchState {
                     .iter()
                     .map(|t| {
                         let artist = t.artist_names.first().cloned().unwrap_or_default();
-                        ListItem::new(Line::from(vec![
+                        let mut spans = Vec::new();
+                        if let Some(marker) =
+                            crate::widgets::selection::marker_span(selection, t.id)
+                        {
+                            spans.push(marker);
+                        }
+                        spans.extend([
                             Span::raw(format!("{:<38} ", truncate(&t.title, 37))),
                             Span::styled(truncate(&artist, 25), Style::default().fg(Color::Gray)),
                             Span::styled(
                                 format!("  {}", format_duration(t.duration.as_secs())),
                                 Style::default().fg(Color::DarkGray),
                             ),
-                        ]))
+                        ]);
+                        ListItem::new(Line::from(spans))
                     })
                     .collect();
                 let list = List::new(items)

@@ -1,3 +1,30 @@
+use std::sync::atomic::AtomicUsize;
+
+/// Global cap on concurrent background image-decode threads across all views.
+/// Prevents thread accumulation when the user navigates between image views rapidly
+/// (each new view state has empty loading_ids but old threads from the previous
+/// state are still running, so without a global cap they compound).
+pub static ACTIVE_IMAGE_THREADS: AtomicUsize = AtomicUsize::new(0);
+pub const MAX_IMAGE_THREADS: usize = 4;
+
+/// Display mode for the artwork views (albums/artists/genres): a compact text
+/// list (default, no image decoding) or the artwork grid. Toggled with `m`.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    #[default]
+    List,
+    Grid,
+}
+
+impl ViewMode {
+    pub fn toggle(&mut self) {
+        *self = match self {
+            ViewMode::List => ViewMode::Grid,
+            ViewMode::Grid => ViewMode::List,
+        };
+    }
+}
+
 pub mod album_detail;
 pub mod albums;
 pub mod artist_detail;
@@ -8,6 +35,8 @@ pub mod library;
 pub mod playlist_detail;
 pub mod playlists;
 pub mod queue;
+#[cfg(test)]
+mod render_tests;
 pub mod scan;
 pub mod search;
 
