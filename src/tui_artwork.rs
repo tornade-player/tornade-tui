@@ -114,7 +114,10 @@ mod tests {
 
     #[test]
     fn test_resolve_prefers_tui() {
-        let assets_dir = std::path::PathBuf::from(env!("HOME")).join(".config/tornade/assets");
+        let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) else {
+            return; // skip on platforms without a home dir env var (e.g. some CI)
+        };
+        let assets_dir = std::path::PathBuf::from(home).join(".config/tornade/assets");
         let orig_dir = assets_dir.join("albums");
         // Use a generic tui dir for this test (any existing size subdir)
         let tui_base = assets_dir.join("tui/albums");
