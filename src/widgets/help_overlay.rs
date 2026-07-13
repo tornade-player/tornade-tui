@@ -15,7 +15,11 @@ pub fn render(frame: &mut Frame) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray))
         .title(" Help ")
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_widget(block, area);
 
     let inner = area.inner(Margin {
