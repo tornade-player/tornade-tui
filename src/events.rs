@@ -1925,23 +1925,25 @@ fn execute_confirm(app: &mut AppState, action: ConfirmAction) {
             }
             Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
         },
-        ConfirmAction::LibraryCleanup => match app.library.validate_sources() {
-            Ok(sources) => {
-                let invalid = sources.iter().filter(|(_, ok)| !*ok).count();
-                if invalid == 0 {
-                    app.set_status("Library is clean — no missing sources", StatusKind::Info);
-                } else {
-                    app.set_status(
-                        format!(
-                            "{} source(s) inaccessible — rescan to update library",
-                            invalid
-                        ),
-                        StatusKind::Error,
-                    );
+        ConfirmAction::LibraryCleanup => {
+            match crate::maintenance::clean_missing_tracks(&app.pool) {
+                Ok(report) => {
+                    let kind = if report.is_clean() {
+                        StatusKind::Info
+                    } else {
+                        StatusKind::Success
+                    };
+                    app.set_status(report.summary(), kind);
+                    if !report.is_clean() {
+                        // Rows have gone from under the cached view state, and
+                        // removing tracks can empty playlists too.
+                        app.reload_current_view();
+                        app.refresh_sidebar_playlists();
+                    }
                 }
+                Err(e) => app.set_status(format!("Cleanup error: {}", e), StatusKind::Error),
             }
-            Err(e) => app.set_status(format!("Cleanup error: {}", e), StatusKind::Error),
-        },
+        }
     }
 }
 

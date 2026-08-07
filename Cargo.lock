@@ -4067,6 +4067,7 @@ dependencies = [
 [[package]]
 name = "tornade-core"
 version = "1.6.0"
+source = "git+https://github.com/tornade-player/tornade-core?branch=main#4e1a1ea0b8848d832cb0548fcf6a4b7cfa5f3d40"
 dependencies = [
  "chrono",
  "cpal",
@@ -4103,6 +4104,7 @@ dependencies = [
  "ratatui",
  "ratatui-image",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "souvlaki",

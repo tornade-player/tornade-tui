@@ -22,6 +22,7 @@ mod app;
 mod async_worker;
 mod commands;
 mod events;
+mod maintenance;
 mod media_keys;
 mod navigation;
 mod player;

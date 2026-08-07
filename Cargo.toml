@@ -32,3 +32,7 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 # HTTP client used to build the core MusicBrainzClient (matches tornade-core) - feature 012
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+
+# Direct SQL for library maintenance (:cleanup). Version tracks tornade-core so
+# cargo unifies to a single rusqlite and the pooled Connection types match.
+rusqlite = "0.32"
