@@ -138,10 +138,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Handle one wake-up. Returns `Ok(true)` when the app should quit.
 fn process_wake(app: &mut AppState, w: wake::Wake, needs_redraw: &mut bool) -> io::Result<bool> {
-    use ratatui::crossterm::event::MouseEventKind;
+    use ratatui::crossterm::event::{KeyEventKind, MouseEventKind};
     match w {
         wake::Wake::Signal => *needs_redraw = true,
-        wake::Wake::Input(Event::Key(key)) => {
+        // Windows delivers Release (and Repeat) key events in addition to
+        // Press; acting on anything but Press double-fires every keystroke.
+        wake::Wake::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => {
             if events::handle_key(app, key) {
                 return Ok(true);
             }
