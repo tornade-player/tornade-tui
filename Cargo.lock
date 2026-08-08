@@ -4110,6 +4110,7 @@ dependencies = [
  "souvlaki",
  "tokio",
  "tornade-core",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
