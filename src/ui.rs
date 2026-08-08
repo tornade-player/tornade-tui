@@ -304,6 +304,16 @@ fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
     if app.show_prefs {
         crate::widgets::stats_overlay::render_titled(frame, " Preferences ", &app.prefs_lines);
     }
+
+    if app.show_vu {
+        let track = app.player_cache.current_track.as_ref();
+        crate::widgets::vu_overlay::render(
+            frame,
+            &app.vu,
+            track.map(|t| t.title.as_str()),
+            track.and_then(|t| t.artist_names.first().map(String::as_str)),
+        );
+    }
 }
 
 fn render_playlist_selector(frame: &mut Frame, app: &mut AppState, area: Rect) {

@@ -7,8 +7,11 @@
 //! Per-platform mechanism:
 //! - **Linux**: MPRIS over D-Bus (`org.mpris.MediaPlayer2`). Requires a D-Bus
 //!   session bus; on a bare TTY without one, [`init`] returns `None`.
-//! - **Windows**: `SystemMediaTransportControls` (SMTC). `souvlaki` supplies a
-//!   hidden window, so `hwnd: None` is accepted.
+//! - **Windows**: `SystemMediaTransportControls` (SMTC). SMTC is bound to a
+//!   window handle and `souvlaki` panics if `hwnd` is `None`, so [`init`]
+//!   creates a hidden window on a dedicated message-pump thread and passes its
+//!   HWND. Message-only windows (`HWND_MESSAGE`) are rejected by SMTC's
+//!   `GetForWindow`, hence a real — but never shown — top-level window.
 //! - **macOS**: `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter`. CAVEAT:
 //!   these deliver remote-command callbacks via the main run loop. A pure
 //!   terminal process does not run an `NSApplication` run loop, so on macOS the
@@ -126,10 +129,21 @@ impl MediaKeyHandle {
 /// support application media controls, in which case the caller continues with
 /// all existing keyboard controls intact (FR-026).
 pub fn init(sender: Sender<MediaKeyEvent>) -> Option<MediaKeyHandle> {
+    #[cfg(windows)]
+    let hwnd = match hidden_window::create() {
+        Some(h) => Some(h),
+        None => {
+            log::warn!("media keys unavailable (hidden window creation failed)");
+            return None;
+        }
+    };
+    #[cfg(not(windows))]
+    let hwnd = None;
+
     let config = PlatformConfig {
         display_name: "Tornade",
         dbus_name: "tornade",
-        hwnd: None,
+        hwnd,
     };
 
     let mut controls = match MediaControls::new(config) {
@@ -156,6 +170,82 @@ pub fn init(sender: Sender<MediaKeyEvent>) -> Option<MediaKeyHandle> {
     let mut handle = MediaKeyHandle { controls };
     handle.set_stopped();
     Some(handle)
+}
+
+/// Hidden window backing the Windows SMTC integration.
+///
+/// SMTC's `GetForWindow` needs a real top-level window: it rejects message-only
+/// (`HWND_MESSAGE`) windows, and a console process has no window of its own.
+/// The window lives on its own thread because an HWND only receives messages
+/// on the thread that created it, and the TUI thread cannot run a Win32
+/// message pump.
+#[cfg(windows)]
+mod hidden_window {
+    use std::ffi::c_void;
+    use std::sync::mpsc;
+
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, RegisterClassW,
+        TranslateMessage, WNDCLASSW,
+    };
+
+    /// Create the window and start its message pump. Returns `None` on any
+    /// failure; never panics (FR-026 applies to the whole media-key feature).
+    pub fn create() -> Option<*mut c_void> {
+        let (tx, rx) = mpsc::channel::<isize>();
+
+        let spawned = std::thread::Builder::new()
+            .name("media-keys-window".into())
+            .spawn(move || unsafe {
+                let class_name: Vec<u16> = "tornade_media_keys\0".encode_utf16().collect();
+                let hinstance = GetModuleHandleW(std::ptr::null());
+                let wc = WNDCLASSW {
+                    style: 0,
+                    lpfnWndProc: Some(DefWindowProcW),
+                    cbClsExtra: 0,
+                    cbWndExtra: 0,
+                    hInstance: hinstance,
+                    hIcon: 0,
+                    hCursor: 0,
+                    hbrBackground: 0,
+                    lpszMenuName: std::ptr::null(),
+                    lpszClassName: class_name.as_ptr(),
+                };
+                if RegisterClassW(&wc) == 0 {
+                    return; // dropping `tx` unblocks the recv below
+                }
+                let hwnd = CreateWindowExW(
+                    0,
+                    class_name.as_ptr(),
+                    class_name.as_ptr(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    hinstance,
+                    std::ptr::null(),
+                );
+                if hwnd == 0 {
+                    return;
+                }
+                let _ = tx.send(hwnd);
+
+                let mut msg: MSG = std::mem::zeroed();
+                while GetMessageW(&mut msg, 0, 0, 0) > 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            });
+
+        if spawned.is_err() {
+            return None;
+        }
+        rx.recv().ok().map(|h| h as *mut c_void)
+    }
 }
 
 #[cfg(test)]

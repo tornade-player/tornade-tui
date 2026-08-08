@@ -362,6 +362,18 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
         return false;
     }
 
+    // VU overlay: close keys are intercepted, everything else falls through so
+    // transport controls (Space, n, N, volume, …) keep working under the meters.
+    if app.show_vu
+        && matches!(
+            key.code,
+            KeyCode::Char('V') | KeyCode::Char('q') | KeyCode::Esc
+        )
+    {
+        app.show_vu = false;
+        return false;
+    }
+
     if app.show_playlist_selector {
         return handle_playlist_selector(app, key);
     }
@@ -718,6 +730,9 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Multi-select (US2) ──
         // `v` toggles selection mode for the current track list.
         KeyCode::Char('v') => toggle_selection_mode(app),
+
+        // ── VU meter overlay ──
+        KeyCode::Char('V') => app.show_vu = true,
 
         // ── Playback ──
         // Space marks/unmarks the highlighted track while in selection mode;
@@ -1669,6 +1684,7 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::GoToArtist => open_current_track_artist(app),
         Command::Stats => app.compute_stats(),
         Command::Prefs => app.compute_prefs(),
+        Command::Visualizer => app.show_vu = true,
         Command::FetchArtwork => app.start_artwork_fetch(),
         Command::ArtworkToggle { mode } => {
             app.artwork_enabled = match mode.as_str() {
@@ -1738,39 +1754,34 @@ fn open_current_track_artist(app: &mut AppState) {
 }
 
 fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
+    if app.scan_result_rx.is_some() {
+        app.set_status("A scan is already running", StatusKind::Error);
+        return;
+    }
     let path = expand_tilde(&path.to_string_lossy());
+    let source = match app.library.add_source("Music", &path) {
+        Ok(source) => source,
+        Err(e) => {
+            app.set_status(format!("Source error: {}", e), StatusKind::Error);
+            return;
+        }
+    };
     let scan_state = crate::views::scan::ScanState::new(std::path::PathBuf::from(&path));
     app.nav.push(View::Scan(scan_state));
-    match app.library.add_source("Music", &path) {
-        Ok(source) => match app.library.scan_directory(&path, source.id) {
-            Ok(result) => {
-                if let View::Scan(s) = app.nav.current_mut() {
-                    s.is_complete = true;
-                }
-                app.set_status(
-                    format!("Scan complete: {} tracks added", result.tracks_added),
-                    StatusKind::Success,
-                );
-                app.reload_current_view();
-                // Generate TUI thumbnails for newly downloaded artwork in background
-                let paths_clone = app.paths.clone();
-                let tui_target = app.tui_target;
-                std::thread::spawn(move || {
-                    crate::tui_artwork::process_all_pending(&paths_clone, tui_target);
-                });
-            }
-            Err(e) => {
-                if let View::Scan(s) = app.nav.current_mut() {
-                    s.error = Some(e.to_string());
-                }
-                app.set_status(format!("Scan error: {}", e), StatusKind::Error);
-            }
-        },
-        Err(e) => {
-            app.nav.pop();
-            app.set_status(format!("Source error: {}", e), StatusKind::Error);
-        }
-    }
+
+    // core's scan_directory is synchronous and can take minutes on a large or
+    // networked library, so it runs on a worker thread. The event loop drives
+    // progress and completion through AppState::poll_scan.
+    let library = app.library.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.scan_result_rx = Some(rx);
+    std::thread::spawn(move || {
+        let outcome = library
+            .scan_directory(&path, source.id)
+            .map_err(|e| e.to_string());
+        let _ = tx.send(outcome);
+        crate::wake::signal();
+    });
 }
 
 // ── Text input mode ──────────────────────────────────────────────────────────
@@ -1925,23 +1936,25 @@ fn execute_confirm(app: &mut AppState, action: ConfirmAction) {
             }
             Err(e) => app.set_status(format!("Error: {}", e), StatusKind::Error),
         },
-        ConfirmAction::LibraryCleanup => match app.library.validate_sources() {
-            Ok(sources) => {
-                let invalid = sources.iter().filter(|(_, ok)| !*ok).count();
-                if invalid == 0 {
-                    app.set_status("Library is clean — no missing sources", StatusKind::Info);
-                } else {
-                    app.set_status(
-                        format!(
-                            "{} source(s) inaccessible — rescan to update library",
-                            invalid
-                        ),
-                        StatusKind::Error,
-                    );
+        ConfirmAction::LibraryCleanup => {
+            match crate::maintenance::clean_missing_tracks(&app.pool) {
+                Ok(report) => {
+                    let kind = if report.is_clean() {
+                        StatusKind::Info
+                    } else {
+                        StatusKind::Success
+                    };
+                    app.set_status(report.summary(), kind);
+                    if !report.is_clean() {
+                        // Rows have gone from under the cached view state, and
+                        // removing tracks can empty playlists too.
+                        app.reload_current_view();
+                        app.refresh_sidebar_playlists();
+                    }
                 }
+                Err(e) => app.set_status(format!("Cleanup error: {}", e), StatusKind::Error),
             }
-            Err(e) => app.set_status(format!("Cleanup error: {}", e), StatusKind::Error),
-        },
+        }
     }
 }
 

@@ -22,6 +22,7 @@ pub enum Command {
     Refresh,
     Stats,
     Prefs,
+    Visualizer,
     FetchArtwork,
     ArtworkToggle { mode: String },
     SourceAdd { path: PathBuf },
@@ -155,6 +156,7 @@ impl Command {
                 }
             }
             "prefs" | "preferences" | "settings" => Self::Prefs,
+            "vis" | "vu" | "visualizer" => Self::Visualizer,
             "sort" => {
                 if rest.is_empty() {
                     Self::Unknown(

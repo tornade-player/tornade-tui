@@ -16,7 +16,8 @@ image = "~0.25"
 # Core library (standalone repo, consumed as a git dependency for CI).
 # For local cross-repo iteration, temporarily switch to:
 #   tornade-core = { path = "../tornade-core" }
-tornade-core = { git = "https://github.com/tornade-player/tornade-core", branch = "main" }
+# TEMP: visualizer-tap branch until tornade-core PR #19 merges, then repoint to main.
+tornade-core = { git = "https://github.com/rdapaz/tornade-core", branch = "feat/visualizer-tap" }
 
 # Standalone dependencies
 serde = { version = "1.0", features = ["derive"] }
@@ -32,3 +33,16 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 # HTTP client used to build the core MusicBrainzClient (matches tornade-core) - feature 012
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+
+# Direct SQL for library maintenance (:cleanup). Version tracks tornade-core so
+# cargo unifies to a single rusqlite and the pooled Connection types match.
+rusqlite = "0.32"
+
+# Hidden window for SMTC media controls (souvlaki requires a real HWND on Windows)
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }

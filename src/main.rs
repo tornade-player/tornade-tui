@@ -22,6 +22,7 @@ mod app;
 mod async_worker;
 mod commands;
 mod events;
+mod maintenance;
 mod media_keys;
 mod navigation;
 mod player;
@@ -137,10 +138,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Handle one wake-up. Returns `Ok(true)` when the app should quit.
 fn process_wake(app: &mut AppState, w: wake::Wake, needs_redraw: &mut bool) -> io::Result<bool> {
-    use ratatui::crossterm::event::MouseEventKind;
+    use ratatui::crossterm::event::{KeyEventKind, MouseEventKind};
     match w {
         wake::Wake::Signal => *needs_redraw = true,
-        wake::Wake::Input(Event::Key(key)) => {
+        // Windows delivers Release (and Repeat) key events in addition to
+        // Press; acting on anything but Press double-fires every keystroke.
+        wake::Wake::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => {
             if events::handle_key(app, key) {
                 return Ok(true);
             }
@@ -202,7 +205,13 @@ fn run_loop(
             needs_redraw = false;
         }
 
-        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        // The VU overlay animates: wake at ~30 fps while it is open instead of
+        // sleeping until the next 500ms playback tick.
+        let timeout = if app.show_vu {
+            Duration::from_millis(33)
+        } else {
+            tick_rate.saturating_sub(last_tick.elapsed())
+        };
         match wake_rx.recv_timeout(timeout) {
             Ok(w) => {
                 if process_wake(app, w, &mut needs_redraw)? {
@@ -222,6 +231,18 @@ fn run_loop(
 
         // Drain any completed async jobs (online scrape / artwork).
         if app.poll_async() {
+            needs_redraw = true;
+        }
+
+        // Drive an in-flight background library scan (progress + completion).
+        // The 500ms recv timeout above bounds how stale the progress can get.
+        if app.poll_scan() {
+            needs_redraw = true;
+        }
+
+        // Feed the VU meters from the core's sample tap while the overlay is up.
+        if app.show_vu {
+            app.update_vu();
             needs_redraw = true;
         }
 

@@ -4067,6 +4067,7 @@ dependencies = [
 [[package]]
 name = "tornade-core"
 version = "1.6.0"
+source = "git+https://github.com/rdapaz/tornade-core?branch=feat%2Fvisualizer-tap#991a90f2f67dd42e4ebb84c4fa1adff706fe55fa"
 dependencies = [
  "chrono",
  "cpal",
@@ -4103,11 +4104,13 @@ dependencies = [
  "ratatui",
  "ratatui-image",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "souvlaki",
  "tokio",
  "tornade-core",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
