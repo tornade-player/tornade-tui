@@ -1738,39 +1738,34 @@ fn open_current_track_artist(app: &mut AppState) {
 }
 
 fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
+    if app.scan_result_rx.is_some() {
+        app.set_status("A scan is already running", StatusKind::Error);
+        return;
+    }
     let path = expand_tilde(&path.to_string_lossy());
+    let source = match app.library.add_source("Music", &path) {
+        Ok(source) => source,
+        Err(e) => {
+            app.set_status(format!("Source error: {}", e), StatusKind::Error);
+            return;
+        }
+    };
     let scan_state = crate::views::scan::ScanState::new(std::path::PathBuf::from(&path));
     app.nav.push(View::Scan(scan_state));
-    match app.library.add_source("Music", &path) {
-        Ok(source) => match app.library.scan_directory(&path, source.id) {
-            Ok(result) => {
-                if let View::Scan(s) = app.nav.current_mut() {
-                    s.is_complete = true;
-                }
-                app.set_status(
-                    format!("Scan complete: {} tracks added", result.tracks_added),
-                    StatusKind::Success,
-                );
-                app.reload_current_view();
-                // Generate TUI thumbnails for newly downloaded artwork in background
-                let paths_clone = app.paths.clone();
-                let tui_target = app.tui_target;
-                std::thread::spawn(move || {
-                    crate::tui_artwork::process_all_pending(&paths_clone, tui_target);
-                });
-            }
-            Err(e) => {
-                if let View::Scan(s) = app.nav.current_mut() {
-                    s.error = Some(e.to_string());
-                }
-                app.set_status(format!("Scan error: {}", e), StatusKind::Error);
-            }
-        },
-        Err(e) => {
-            app.nav.pop();
-            app.set_status(format!("Source error: {}", e), StatusKind::Error);
-        }
-    }
+
+    // core's scan_directory is synchronous and can take minutes on a large or
+    // networked library, so it runs on a worker thread. The event loop drives
+    // progress and completion through AppState::poll_scan.
+    let library = app.library.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.scan_result_rx = Some(rx);
+    std::thread::spawn(move || {
+        let outcome = library
+            .scan_directory(&path, source.id)
+            .map_err(|e| e.to_string());
+        let _ = tx.send(outcome);
+        crate::wake::signal();
+    });
 }
 
 // ── Text input mode ──────────────────────────────────────────────────────────
