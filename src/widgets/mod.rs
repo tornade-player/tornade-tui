@@ -9,3 +9,4 @@ pub mod selection;
 pub mod sidebar;
 pub mod stats_overlay;
 pub mod tag_editor;
+pub mod vu_overlay;

@@ -186,8 +186,8 @@ mod hidden_window {
 
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
-        TranslateMessage, MSG, WNDCLASSW,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, RegisterClassW,
+        TranslateMessage, WNDCLASSW,
     };
 
     /// Create the window and start its message pump. Returns `None` on any

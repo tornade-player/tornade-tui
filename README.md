@@ -13,6 +13,7 @@ A terminal UI music player built on [tornade-core](https://github.com/tornade-pl
 - **Library views**: Tracks, Albums, Artists, Genres, Playlists, Queue, Search
 - **Detail views**: album tracklist, artist albums, genre tracks, playlist editor
 - **Player bar**: artwork, transport controls, progress bar, volume, shuffle and repeat indicators
+- **VU meters**: press `V` for full-screen left/right level meters with peak hold, fed from the live audio output
 - **Queue management**: add, remove, reorder, clear, play from position
 - **Playlist management**: create, rename, delete, add/remove tracks, reorder, import M3U
 - **Global search** across tracks, albums, and artists
@@ -73,6 +74,7 @@ cargo build --release
 | `-` | Volume down |
 | `S` | Toggle shuffle |
 | `R` | Cycle repeat (Off / All / One) |
+| `V` | VU meters overlay (close with `V`/`q`/`Esc`; transport keys keep working) |
 
 ### Library
 
@@ -117,6 +119,7 @@ Press `:` to open the command bar. Press `Tab` to autocomplete, `Esc` to cancel.
 | `:playlist delete <name>` | Delete a playlist |
 | `:playlist add <name>` | Add selected track to a playlist |
 | `:seek <mm:ss>` | Seek to position |
+| `:vis` | Toggle the VU meters overlay |
 | `:help` | Show help overlay |
 
 ## Image Rendering

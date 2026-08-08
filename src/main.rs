@@ -205,7 +205,13 @@ fn run_loop(
             needs_redraw = false;
         }
 
-        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        // The VU overlay animates: wake at ~30 fps while it is open instead of
+        // sleeping until the next 500ms playback tick.
+        let timeout = if app.show_vu {
+            Duration::from_millis(33)
+        } else {
+            tick_rate.saturating_sub(last_tick.elapsed())
+        };
         match wake_rx.recv_timeout(timeout) {
             Ok(w) => {
                 if process_wake(app, w, &mut needs_redraw)? {
@@ -231,6 +237,12 @@ fn run_loop(
         // Drive an in-flight background library scan (progress + completion).
         // The 500ms recv timeout above bounds how stale the progress can get.
         if app.poll_scan() {
+            needs_redraw = true;
+        }
+
+        // Feed the VU meters from the core's sample tap while the overlay is up.
+        if app.show_vu {
+            app.update_vu();
             needs_redraw = true;
         }
 

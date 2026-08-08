@@ -362,6 +362,18 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
         return false;
     }
 
+    // VU overlay: close keys are intercepted, everything else falls through so
+    // transport controls (Space, n, N, volume, …) keep working under the meters.
+    if app.show_vu
+        && matches!(
+            key.code,
+            KeyCode::Char('V') | KeyCode::Char('q') | KeyCode::Esc
+        )
+    {
+        app.show_vu = false;
+        return false;
+    }
+
     if app.show_playlist_selector {
         return handle_playlist_selector(app, key);
     }
@@ -718,6 +730,9 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
         // ── Multi-select (US2) ──
         // `v` toggles selection mode for the current track list.
         KeyCode::Char('v') => toggle_selection_mode(app),
+
+        // ── VU meter overlay ──
+        KeyCode::Char('V') => app.show_vu = true,
 
         // ── Playback ──
         // Space marks/unmarks the highlighted track while in selection mode;
@@ -1669,6 +1684,7 @@ fn execute_command(app: &mut AppState, input: &str) {
         Command::GoToArtist => open_current_track_artist(app),
         Command::Stats => app.compute_stats(),
         Command::Prefs => app.compute_prefs(),
+        Command::Visualizer => app.show_vu = true,
         Command::FetchArtwork => app.start_artwork_fetch(),
         Command::ArtworkToggle { mode } => {
             app.artwork_enabled = match mode.as_str() {

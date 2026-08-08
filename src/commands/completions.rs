@@ -10,6 +10,7 @@ pub static COMMAND_LIST: &[&str] = &[
     ":playlist add",
     ":import",
     ":seek",
+    ":vis",
     ":help",
     ":tracks",
     ":albums",

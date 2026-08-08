@@ -40,6 +40,7 @@ pub fn render(frame: &mut Frame) {
                 ("-", "Volume down"),
                 ("S", "Toggle shuffle"),
                 ("R", "Cycle repeat (Off / All / One)"),
+                ("V", "VU meters (also :vis)"),
             ],
         ),
         (

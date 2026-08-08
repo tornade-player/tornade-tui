@@ -168,6 +168,10 @@ pub struct AppState {
     // UI overlays
     pub show_help: bool,
     pub show_stats: bool,
+    /// Full-screen VU meter overlay (`V` / `:vis`). Meter state persists so
+    /// levels decay smoothly rather than resetting on reopen.
+    pub show_vu: bool,
+    pub vu: crate::widgets::vu_overlay::VuMeterState,
     pub stats_lines: Vec<(String, String)>,
     pub show_prefs: bool,
     pub prefs_lines: Vec<(String, String)>,
@@ -271,6 +275,8 @@ impl AppState {
             confirm: None,
             show_help: false,
             show_stats: false,
+            show_vu: false,
+            vu: crate::widgets::vu_overlay::VuMeterState::default(),
             stats_lines: Vec::new(),
             show_prefs: false,
             prefs_lines: Vec::new(),
@@ -1064,6 +1070,15 @@ impl AppState {
         any
     }
 
+    /// Feed the VU meters from the core's visualizer sample tap. ~50 ms of
+    /// stereo audio at the 48 kHz stream rate. Called from the event loop's
+    /// fast path while the VU overlay is open.
+    pub fn update_vu(&mut self) {
+        let (samples, channels) = self.player.visualizer_samples(4800);
+        self.vu
+            .update(&samples, channels, std::time::Instant::now());
+    }
+
     /// Drive an in-flight background library scan: mirror core's progress into
     /// the Scan view while running, finalize when the worker thread reports the
     /// outcome. Returns true if anything changed that needs a redraw.
@@ -1106,8 +1121,7 @@ impl AppState {
                 if let View::Scan(s) = self.nav.current_mut() {
                     let changed = match (&s.progress, &progress) {
                         (Some(a), Some(b)) => {
-                            a.processed_files != b.processed_files
-                                || a.total_files != b.total_files
+                            a.processed_files != b.processed_files || a.total_files != b.total_files
                         }
                         (None, None) => false,
                         _ => true,
