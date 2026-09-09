@@ -228,6 +228,7 @@ pub struct AppState {
     // Click areas updated each frame by ui::draw (used for mouse hit detection)
     pub sidebar_area: Option<ratatui::layout::Rect>,
     pub right_queue_area: Option<ratatui::layout::Rect>,
+    pub queue_filter_bar_area: Option<ratatui::layout::Rect>,
     // Double-click detection: last click (col, row, instant)
     pub last_click: Option<(u16, u16, std::time::Instant)>,
 
@@ -299,6 +300,7 @@ impl AppState {
             toolbar_hit_zones: ToolbarHitZones::default(),
             sidebar_area: None,
             right_queue_area: None,
+            queue_filter_bar_area: None,
             last_click: None,
             tui_target,
         };

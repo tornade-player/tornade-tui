@@ -72,6 +72,8 @@ pub struct LibraryState {
     scrollbar_state: ScrollbarState,
     /// Area of the track list (set each frame during render, used for mouse hit detection).
     pub list_area: Option<Rect>,
+    /// Area of the search bar (set each frame during render, used for mouse hit detection).
+    pub search_bar_area: Option<Rect>,
 }
 
 impl LibraryState {
@@ -224,6 +226,7 @@ impl LibraryState {
             self.filter_active,
             selection,
         );
+        self.search_bar_area = Some(chunks[0]);
         self.list_area = Some(chunks[2]);
 
         if self.total_count == 0 && self.filter.is_empty() {

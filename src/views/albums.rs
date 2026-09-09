@@ -44,6 +44,7 @@ pub struct AlbumsState {
     pub scroll_row: usize,
     pub cols: usize,
     pub last_grid_area: Rect,
+    pub search_bar_area: Option<Rect>,
     // computed each render, stored for click detection between renders
     img_cols: u16,
     cell_stride_w: u16,
@@ -68,6 +69,7 @@ impl Default for AlbumsState {
             scroll_row: 0,
             cols: 4,
             last_grid_area: Rect::default(),
+            search_bar_area: None,
             img_cols: IMG_H,
             cell_stride_w: IMG_H + GAP_W,
             cell_stride_h: IMG_H + TEXT_PADDING + TEXT_H + GAP_H,
@@ -234,6 +236,7 @@ impl AlbumsState {
         ])
         .split(area);
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
+        self.search_bar_area = Some(chunks[0]);
         let area = chunks[2];
 
         // List mode: compact text rows, no artwork decoding at all.

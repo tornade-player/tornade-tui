@@ -142,6 +142,36 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 return;
             }
 
+            // Click on a view's search/filter bar activates it for typing.
+            let search_bar_click = match app.nav.current() {
+                View::Library(s) => s.search_bar_area,
+                View::Albums(s) => s.search_bar_area,
+                View::Artists(s) => s.search_bar_area,
+                View::Genres(s) => s.search_bar_area,
+                _ => None,
+            }
+            .map(|r| rect_contains(r, col, row))
+            .unwrap_or(false);
+            if search_bar_click {
+                match app.nav.current_mut() {
+                    View::Library(s) => s.filter_active = true,
+                    View::Albums(s) => s.filter_active = true,
+                    View::Artists(s) => s.filter_active = true,
+                    View::Genres(s) => s.filter_active = true,
+                    _ => {}
+                }
+                return;
+            }
+
+            // Click on the queue filter bar activates it for typing.
+            if let Some(area) = app.queue_filter_bar_area
+                && rect_contains(area, col, row)
+            {
+                app.queue_filter_active = true;
+                app.focused_panel = FocusedPanel::RightPanel;
+                return;
+            }
+
             // Click on an album in the grid
             let clicked_idx = if let View::Albums(s) = app.nav.current() {
                 s.album_at_pos(col, row)
@@ -266,20 +296,21 @@ fn handle_sidebar_click(app: &mut AppState, area: ratatui::layout::Rect, row: u1
     // Item layout (0-indexed from the first item row):
     //   0: blank
     //   1: "Library" header
-    //   2 + 2*i (i=0..4): library entry i  (matches SIDEBAR_DISPLAY_ORDER)
-    //   12: blank (gap before "Playlists")
-    //   13: "Playlists" header
-    //   14: blank
-    //   15 + 2*j (j=0..n): playlist j
+    //   2: blank
+    //   3 + 2*i (i=0..4): library entry i  (matches SIDEBAR_DISPLAY_ORDER)
+    //   13: blank (gap before "Playlists")
+    //   14: "Playlists" header
+    //   15: blank
+    //   16 + 2*j (j=0..n): playlist j
     let item_index = row.saturating_sub(area.y + 1) as usize;
-    if (2..=10).contains(&item_index) && (item_index - 2).is_multiple_of(2) {
-        let entry_pos = (item_index - 2) / 2;
+    if (3..=11).contains(&item_index) && (item_index - 3).is_multiple_of(2) {
+        let entry_pos = (item_index - 3) / 2;
         if let Some(&entry) = SIDEBAR_DISPLAY_ORDER.get(entry_pos) {
             app.navigate_to(entry);
             app.focused_panel = FocusedPanel::Content;
         }
-    } else if item_index >= 15 && (item_index - 15).is_multiple_of(2) {
-        let playlist_pos = (item_index - 15) / 2;
+    } else if item_index >= 16 && (item_index - 16).is_multiple_of(2) {
+        let playlist_pos = (item_index - 16) / 2;
         let playlist_id = app.sidebar_playlists.get(playlist_pos).map(|&(id, _)| id);
         if let Some(id) = playlist_id {
             app.navigate_to_playlist(id);

@@ -33,6 +33,7 @@ pub struct GenresState {
     pub filter_active: bool,
     pub mode: crate::views::ViewMode,
     pub list_state: ListState,
+    pub search_bar_area: Option<Rect>,
     /// Artwork paths (up to 4) per genre, indexed parallel to `genres`.
     artwork_paths: Vec<Vec<PathBuf>>,
     /// Lazily loaded mosaic protocols indexed parallel to `genres`.
@@ -53,6 +54,7 @@ impl Default for GenresState {
             filter_active: false,
             mode: crate::views::ViewMode::default(),
             list_state: ListState::default(),
+            search_bar_area: None,
             artwork_paths: Vec::new(),
             image_states: Vec::new(),
             loading_ids: HashSet::new(),
@@ -152,6 +154,7 @@ impl GenresState {
         ])
         .split(area);
         render_search_bar(frame, chunks[0], &self.filter, self.filter_active);
+        self.search_bar_area = Some(chunks[0]);
 
         let filtered = self.filtered_genres();
         let filtered_len = filtered.len();

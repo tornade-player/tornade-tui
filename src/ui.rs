@@ -90,6 +90,7 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         .split(right_panel_area);
 
     app.right_queue_area = Some(right_chunks[1]);
+    app.queue_filter_bar_area = Some(right_chunks[0]);
     crate::views::queue::render_filter_bar(
         frame,
         right_chunks[0],
