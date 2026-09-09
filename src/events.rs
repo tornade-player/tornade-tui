@@ -1742,30 +1742,19 @@ fn start_scan(app: &mut AppState, path: std::path::PathBuf) {
     let scan_state = crate::views::scan::ScanState::new(std::path::PathBuf::from(&path));
     app.nav.push(View::Scan(scan_state));
     match app.library.add_source("Music", &path) {
-        Ok(source) => match app.library.scan_directory(&path, source.id) {
-            Ok(result) => {
-                if let View::Scan(s) = app.nav.current_mut() {
-                    s.is_complete = true;
-                }
-                app.set_status(
-                    format!("Scan complete: {} tracks added", result.tracks_added),
-                    StatusKind::Success,
-                );
-                app.reload_current_view();
-                // Generate TUI thumbnails for newly downloaded artwork in background
-                let paths_clone = app.paths.clone();
-                let tui_target = app.tui_target;
-                std::thread::spawn(move || {
-                    crate::tui_artwork::process_all_pending(&paths_clone, tui_target);
-                });
-            }
-            Err(e) => {
-                if let View::Scan(s) = app.nav.current_mut() {
-                    s.error = Some(e.to_string());
-                }
-                app.set_status(format!("Scan error: {}", e), StatusKind::Error);
-            }
-        },
+        Ok(source) => {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let library = app.library.clone();
+            let path_clone = path.clone();
+            std::thread::spawn(move || {
+                let result = library
+                    .scan_directory(&path_clone, source.id)
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(result);
+                crate::wake::signal();
+            });
+            app.scan_job = Some(rx);
+        }
         Err(e) => {
             app.nav.pop();
             app.set_status(format!("Source error: {}", e), StatusKind::Error);

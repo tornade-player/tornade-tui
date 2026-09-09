@@ -242,6 +242,11 @@ fn run_loop(
             needs_redraw = true;
         }
 
+        // Drain the in-flight background library scan, if any.
+        if app.poll_scan() {
+            needs_redraw = true;
+        }
+
         // Drain hardware media-key events (FR-024). Toggle is debounced (FR-027).
         while let Ok(ev) = media_rx.try_recv() {
             if matches!(ev, media_keys::MediaKeyEvent::Toggle)

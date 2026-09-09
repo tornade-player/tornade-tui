@@ -185,6 +185,8 @@ pub struct AppState {
     pub artwork_menu: Option<ArtworkMenuState>,
     /// Worker thread handle for async MusicBrainz / artwork calls (US3).
     pub async_worker: AsyncWorker,
+    /// Receiver for the in-flight background library scan, if any.
+    pub scan_job: Option<std::sync::mpsc::Receiver<Result<tornade_core::services::ScanResult, String>>>,
 
     // Panel focus
     pub focused_panel: FocusedPanel,
@@ -278,6 +280,7 @@ impl AppState {
             scrape_picker: None,
             artwork_menu: None,
             async_worker: AsyncWorker::spawn(),
+            scan_job: None,
             focused_panel: FocusedPanel::Content,
             sidebar_cursor: 0,
             right_panel_queue_state: ratatui::widgets::ListState::default(),
@@ -1057,6 +1060,74 @@ impl AppState {
             any = true;
         }
         any
+    }
+
+    /// Drain the in-flight background scan job, if any.
+    ///
+    /// Refreshes the scan view's progress bar from `LibraryService::scan_progress()`
+    /// every call, and applies the final `ScanResult`/error to `ScanState` plus the
+    /// status bar once the background thread finishes. Returns true if anything
+    /// changed (caller should redraw).
+    pub fn poll_scan(&mut self) -> bool {
+        let Some(rx) = self.scan_job.as_ref() else {
+            return false;
+        };
+
+        let mut changed = false;
+
+        if let View::Scan(s) = self.nav.current_mut() {
+            s.progress = self.library.scan_progress();
+            changed = true;
+        }
+
+        match rx.try_recv() {
+            Ok(Ok(result)) => {
+                if let View::Scan(s) = self.nav.current_mut() {
+                    s.is_complete = true;
+                    s.error_count = result.errors.len();
+                }
+                let msg = if result.errors.is_empty() {
+                    format!("Scan complete: {} tracks added", result.tracks_added)
+                } else {
+                    format!(
+                        "Scan complete: {} tracks added, {} problem(s) — see {}",
+                        result.tracks_added,
+                        result.errors.len(),
+                        self.paths.reports_dir().display()
+                    )
+                };
+                let kind = if result.errors.is_empty() {
+                    StatusKind::Success
+                } else {
+                    StatusKind::Info
+                };
+                self.set_status(msg, kind);
+                self.reload_current_view();
+                // Generate TUI thumbnails for newly downloaded artwork in background
+                let paths_clone = self.paths.clone();
+                let tui_target = self.tui_target;
+                std::thread::spawn(move || {
+                    crate::tui_artwork::process_all_pending(&paths_clone, tui_target);
+                });
+                self.scan_job = None;
+                changed = true;
+            }
+            Ok(Err(e)) => {
+                if let View::Scan(s) = self.nav.current_mut() {
+                    s.error = Some(e.clone());
+                }
+                self.set_status(format!("Scan error: {}", e), StatusKind::Error);
+                self.scan_job = None;
+                changed = true;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.scan_job = None;
+                changed = true;
+            }
+        }
+
+        changed
     }
 
     /// Fold a completed async result into the scrape picker / artwork menu.
