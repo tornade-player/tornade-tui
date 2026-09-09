@@ -5,7 +5,11 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Gauge, Paragraph},
+    widgets::{
+        Block, Gauge, Paragraph,
+        canvas::{Canvas, Circle, Points},
+    },
+    symbols::Marker,
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 use tornade_core::models::AudioFormat;
@@ -112,7 +116,7 @@ pub fn render(
 
     // Bottom row: [transport=10] [gap=1] [elapsed=5] [progress] [total=5]
     let bottom = Layout::horizontal([
-        Constraint::Length(10), // transport (prev + play + next)
+        Constraint::Length(9), // transport (prev + play + next)
         Constraint::Length(1),  // gap — mirrors top artwork gap
         Constraint::Length(5),  // elapsed
         Constraint::Min(0),     // progress gauge
@@ -123,13 +127,13 @@ pub fn render(
     // Transport: spread prev / play / next across the full artwork width (3+4+3=10)
     let transport = Layout::horizontal([
         Constraint::Length(3), // ◀◀
-        Constraint::Length(4), // ▶/⏸  (wider = more prominent)
+        Constraint::Length(3), // ▶/⏸
         Constraint::Length(3), // ▶▶
     ])
     .split(bottom[0]);
 
     let play_icon = match cache.state {
-        PlaybackState::Playing => "⏸",
+        PlaybackState::Playing => "■",
         _ => "▶",
     };
 
@@ -143,12 +147,11 @@ pub fn render(
     );
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            play_icon,
+            format!(" {play_icon} "),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
-        )))
-        .alignment(Alignment::Center),
+        ))),
         transport[1],
     );
     frame.render_widget(
@@ -209,43 +212,69 @@ pub fn render(
 }
 
 fn render_volume_knob(frame: &mut Frame, area: Rect, pct: u8) {
-    if area.height < 4 {
+    // Width must be ~2x height for the braille dot grid (2 cols x 4 rows per
+    // cell) to map to an actually round circle on screen.
+    let width = area.width.min(6);
+    let height = (width / 2).max(1);
+    if area.height < height || width < 4 {
         return;
     }
-    let top_pad = area.height.saturating_sub(4) / 2;
+    let top_pad = area.height.saturating_sub(height) / 2;
     let knob = Rect {
         x: area.x,
         y: area.y + top_pad,
-        width: area.width.min(7),
-        height: 4,
+        width,
+        height,
     };
-    let col = if pct > 0 {
-        Color::Cyan
-    } else {
-        Color::DarkGray
-    };
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(Span::styled("╭────╮", Style::default().fg(col))),
-            Line::from(vec![
-                Span::styled("│", Style::default().fg(col)),
-                Span::styled(
-                    format!("{:>3} ", pct),
+
+    let fraction = (pct as f64 / 100.0).clamp(0.0, 1.0);
+    let sweep_deg = (fraction * 360.0).round() as i32;
+    let arc_points: Vec<(f64, f64)> = (0..=sweep_deg)
+        .map(|deg| {
+            // Start at the top (12 o'clock), sweep clockwise.
+            let radians = (f64::from(deg) - 90.0).to_radians();
+            (radians.cos(), radians.sin())
+        })
+        .collect();
+    // Fixed width so the label always centers the same regardless of digit
+    // count (1% vs 99% vs 100%): center the number within a 3-char field.
+    let label = format!("{:^3}%", pct);
+    // ratatui's canvas maps a label's x to a character column via
+    // `(label.x - left) * (canvas_width - 1) / (right - left)`, truncated to
+    // an integer. Solve that equation for the label_x that lands exactly on
+    // the desired left-padding column so the label centers on the glyph grid
+    // (not on the continuous float space, which rounds inconsistently).
+    let start_col = ((width as f64 - label.len() as f64) / 2.0).floor();
+    let label_x = start_col * 2.0 / (width as f64 - 1.0) - 1.0 + 1e-6;
+
+    let canvas = Canvas::default()
+        .marker(Marker::Braille)
+        .x_bounds([-1.0, 1.0])
+        .y_bounds([-1.0, 1.0])
+        .paint(move |ctx| {
+            ctx.draw(&Circle {
+                x: 0.0,
+                y: 0.0,
+                radius: 1.0,
+                color: Color::DarkGray,
+            });
+            ctx.draw(&Points {
+                coords: &arc_points,
+                color: Color::Magenta,
+            });
+            ctx.print(
+                label_x,
+                0.0,
+                Line::from(Span::styled(
+                    label.clone(),
                     Style::default()
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("│", Style::default().fg(col)),
-            ]),
-            Line::from(vec![
-                Span::styled("│", Style::default().fg(col)),
-                Span::styled("  % ", Style::default().fg(Color::Gray)),
-                Span::styled("│", Style::default().fg(col)),
-            ]),
-            Line::from(Span::styled("╰────╯", Style::default().fg(col))),
-        ]),
-        knob,
-    );
+                )),
+            );
+        });
+
+    frame.render_widget(canvas, knob);
 }
 
 fn format_audio_info(track: &tornade_core::models::Track) -> (String, String) {
