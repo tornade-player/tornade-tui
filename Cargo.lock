@@ -4067,7 +4067,7 @@ dependencies = [
 [[package]]
 name = "tornade-core"
 version = "1.6.0"
-source = "git+https://github.com/tornade-player/tornade-core?branch=main#d72a7971d59fffa8941db81417a475952a08f945"
+source = "git+https://github.com/tornade-player/tornade-core?branch=main#92cbb2f65bcf28b2d8fb26e8a8bea073a6e23ab7"
 dependencies = [
  "chrono",
  "cpal",

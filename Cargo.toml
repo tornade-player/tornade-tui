@@ -16,6 +16,7 @@ image = "~0.25"
 # Core library (standalone repo, consumed as a git dependency for CI).
 # For local cross-repo iteration, temporarily switch to:
 #   tornade-core = { path = "../tornade-core" }
+# tornade-core = { path = "../tornade-core" }
 tornade-core = { git = "https://github.com/tornade-player/tornade-core", branch = "main" }
 
 # Standalone dependencies
