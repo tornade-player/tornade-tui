@@ -35,10 +35,27 @@ mod widgets;
 use app::AppState;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
-
     // Initialize application paths and database
     let paths = AppPaths::new()?;
+
+    // Route logs to a file instead of stderr: the TUI runs in raw mode /
+    // alternate screen, so anything written directly to stderr (e.g. the
+    // error!() logs emitted per corrupted file during a scan) visually
+    // corrupts the display.
+    let log_path = paths.config_dir.join("tornade-tui.log");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(log_file) => {
+            env_logger::Builder::from_default_env()
+                .target(env_logger::Target::Pipe(Box::new(log_file)))
+                .init();
+        }
+        Err(_) => env_logger::init(),
+    }
+
     let pool = db::create_pool(paths.database_path())?;
     db::initialize_database(&pool)?;
 

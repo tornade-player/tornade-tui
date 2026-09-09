@@ -14,6 +14,7 @@ pub struct ScanState {
     pub progress: Option<ScanProgress>,
     pub is_complete: bool,
     pub error: Option<String>,
+    pub error_count: usize,
 }
 
 impl ScanState {
@@ -23,6 +24,7 @@ impl ScanState {
             progress: None,
             is_complete: false,
             error: None,
+            error_count: 0,
         }
     }
 
@@ -59,6 +61,15 @@ impl ScanState {
                 lines.push(Line::from(Span::styled(
                     format!("{} files processed", p.processed_files),
                     Style::default().fg(Color::Gray),
+                )));
+            }
+            if self.error_count > 0 {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "{} file(s) had problems — see reports folder",
+                        self.error_count
+                    ),
+                    Style::default().fg(Color::Yellow),
                 )));
             }
             lines.push(Line::from(""));
@@ -106,5 +117,18 @@ impl ScanState {
                 .percent(pct);
             frame.render_widget(gauge, gauge_area);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_scan_state_has_no_errors() {
+        let state = ScanState::new(PathBuf::from("/tmp/music"));
+        assert_eq!(state.error_count, 0);
+        assert!(!state.is_complete);
+        assert!(state.error.is_none());
     }
 }

@@ -616,4 +616,19 @@ mod tests {
             &format!("=== Scan (initial state) ===\n{out}"),
         );
     }
+
+    #[test]
+    fn render_scan_complete_with_errors() {
+        let mut state = ScanState::new(PathBuf::from("/Users/thomas/Music"));
+        state.is_complete = true;
+        state.error_count = 3;
+
+        let t = render(80, 20, |frame, area| state.render(frame, area));
+        let out = dump_buffer(&t);
+        dump_to_file(
+            "scan_complete_with_errors_80x20",
+            &format!("=== Scan (complete, with errors) ===\n{out}"),
+        );
+        assert!(out.contains("3 file(s) had problems"));
+    }
 }
