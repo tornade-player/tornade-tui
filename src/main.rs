@@ -136,6 +136,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Run event loop
     let result = run_loop(&mut terminal, &mut app, media_rx, media_handle);
 
+    // Persist the current track and position so the next launch can resume
+    // where the user left off (best-effort, logs and no-ops on failure).
+    app.player.save_state();
+
     // Restore terminal
     disable_raw_mode()?;
     execute!(
