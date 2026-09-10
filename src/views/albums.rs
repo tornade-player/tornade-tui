@@ -5,10 +5,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
-    },
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
@@ -45,12 +42,13 @@ pub struct AlbumsState {
     pub cols: usize,
     pub last_grid_area: Rect,
     pub search_bar_area: Option<Rect>,
+    pub list_area: Option<Rect>,
+    pub list_mode_state: ListState,
     // computed each render, stored for click detection between renders
     img_cols: u16,
     cell_stride_w: u16,
     cell_stride_h: u16,
     image_cache: HashMap<i64, StatefulProtocol>,
-    scrollbar_state: ScrollbarState,
     // Background loading
     pending_decoded: PendingQueue,
     loading_ids: HashSet<i64>,
@@ -70,11 +68,12 @@ impl Default for AlbumsState {
             cols: 4,
             last_grid_area: Rect::default(),
             search_bar_area: None,
+            list_area: None,
+            list_mode_state: ListState::default(),
             img_cols: IMG_H,
             cell_stride_w: IMG_H + GAP_W,
             cell_stride_h: IMG_H + TEXT_PADDING + TEXT_H + GAP_H,
             image_cache: HashMap::new(),
-            scrollbar_state: ScrollbarState::default(),
             pending_decoded: Arc::new(Mutex::new(Vec::new())),
             loading_ids: HashSet::new(),
             failed_ids: HashSet::new(),
@@ -217,6 +216,8 @@ impl AlbumsState {
             area,
             &mut ls,
         );
+        self.list_area = Some(area);
+        self.list_mode_state = ls;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -419,19 +420,6 @@ impl AlbumsState {
                 frame, cell_rect, title, artist, *year, is_sel, focused, protocol, img_cols,
             );
         }
-
-        // 4. Scrollbar
-        self.scrollbar_state = ScrollbarState::new(total_rows).position(self.scroll_row);
-        let scrollbar_area = Rect {
-            x: area.x + area.width.saturating_sub(1),
-            width: 1,
-            ..area
-        };
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            scrollbar_area,
-            &mut self.scrollbar_state,
-        );
 
         has_pending
     }

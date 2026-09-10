@@ -5,10 +5,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
-    },
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
@@ -44,11 +41,13 @@ pub struct ArtistsState {
     pub scroll_row: usize,
     pub cols: usize,
     pub search_bar_area: Option<Rect>,
+    pub last_grid_area: Rect,
+    pub list_area: Option<Rect>,
+    pub list_mode_state: ListState,
     img_cols: u16,
     cell_stride_w: u16,
     cell_stride_h: u16,
     image_cache: HashMap<i64, StatefulProtocol>,
-    scrollbar_state: ScrollbarState,
     pending_decoded: PendingQueue,
     loading_ids: HashSet<i64>,
     failed_ids: HashSet<i64>,
@@ -67,11 +66,13 @@ impl Default for ArtistsState {
             scroll_row: 0,
             cols: 4,
             search_bar_area: None,
+            last_grid_area: Rect::default(),
+            list_area: None,
+            list_mode_state: ListState::default(),
             img_cols: IMG_H,
             cell_stride_w: IMG_H + GAP_W,
             cell_stride_h: IMG_H + TEXT_PADDING + TEXT_H + GAP_H,
             image_cache: HashMap::new(),
-            scrollbar_state: ScrollbarState::default(),
             pending_decoded: Arc::new(Mutex::new(Vec::new())),
             loading_ids: HashSet::new(),
             failed_ids: HashSet::new(),
@@ -95,6 +96,22 @@ impl ArtistsState {
 
     pub fn selected_artist(&self) -> Option<&Artist> {
         self.display_artists().get(self.selected)
+    }
+
+    pub fn artist_at_pos(&self, x: u16, y: u16) -> Option<usize> {
+        let a = self.last_grid_area;
+        if a.width == 0 || x < a.x || y < a.y || x >= a.x + a.width || y >= a.y + a.height {
+            return None;
+        }
+        let col = ((x - a.x) / self.cell_stride_w) as usize;
+        let row_in_view = ((y - a.y) / self.cell_stride_h) as usize;
+        if col >= self.cols {
+            return None;
+        }
+        let row = self.scroll_row + row_in_view;
+        let idx = row * self.cols + col;
+        let total = self.display_artists().len();
+        if idx >= total { None } else { Some(idx) }
     }
 
     pub fn move_right(&mut self) {
@@ -184,6 +201,8 @@ impl ArtistsState {
             area,
             &mut ls,
         );
+        self.list_area = Some(area);
+        self.list_mode_state = ls;
     }
 
     pub fn render(
@@ -229,6 +248,7 @@ impl ArtistsState {
             width: area.width.saturating_sub(GRID_PAD * 2 + 1),
             ..area
         };
+        self.last_grid_area = grid_area;
 
         self.cols = ((grid_area.width / self.cell_stride_w) as usize).max(1);
         let rows_visible = ((grid_area.height / self.cell_stride_h) as usize).max(1);
@@ -343,19 +363,6 @@ impl ArtistsState {
             };
             render_cell(frame, cell_rect, name, is_sel, focused, protocol, img_cols);
         }
-
-        // 4. Scrollbar
-        self.scrollbar_state = ScrollbarState::new(total_rows).position(self.scroll_row);
-        let scrollbar_area = Rect {
-            x: area.x + area.width.saturating_sub(1),
-            width: 1,
-            ..area
-        };
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            scrollbar_area,
-            &mut self.scrollbar_state,
-        );
 
         has_pending
     }

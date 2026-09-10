@@ -168,11 +168,12 @@ fn process_wake(app: &mut AppState, w: wake::Wake, needs_redraw: &mut bool) -> i
             *needs_redraw = true;
         }
         wake::Wake::Input(Event::Mouse(mouse)) => {
-            // Only act on clicks/scroll, not moves (moves fire constantly).
+            // Only act on clicks/drag/scroll, not moves (moves fire constantly).
             if matches!(
                 mouse.kind,
                 MouseEventKind::Down(_)
                     | MouseEventKind::Up(_)
+                    | MouseEventKind::Drag(_)
                     | MouseEventKind::ScrollDown
                     | MouseEventKind::ScrollUp
             ) {

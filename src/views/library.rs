@@ -6,10 +6,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
-    },
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use tornade_core::models::Track;
 use tornade_core::services::LibraryService;
@@ -69,7 +66,6 @@ pub struct LibraryState {
     pub skipped_ids: Vec<i64>,
     pub sort_key: SortKey,
     pub sort_desc: bool,
-    scrollbar_state: ScrollbarState,
     /// Area of the track list (set each frame during render, used for mouse hit detection).
     pub list_area: Option<Rect>,
     /// Area of the search bar (set each frame during render, used for mouse hit detection).
@@ -311,14 +307,6 @@ impl LibraryState {
             .highlight_symbol(hl_sym);
 
         frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
-
-        let visible_pos = self.list_state.selected().unwrap_or(0);
-        self.scrollbar_state = ScrollbarState::new(display.len()).position(visible_pos);
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            chunks[2],
-            &mut self.scrollbar_state,
-        );
     }
 }
 

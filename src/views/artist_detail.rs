@@ -5,10 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
-    },
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::path::Path;
@@ -23,10 +20,10 @@ pub struct ArtistDetailState {
     pub albums: Vec<Album>,
     pub related: Vec<Artist>,
     pub list_state: ListState,
+    pub list_area: Option<Rect>,
     image_state: Option<StatefulProtocol>,
     pending_image: Arc<Mutex<Option<DynamicImage>>>,
     image_loading: bool,
-    scrollbar_state: ScrollbarState,
 }
 
 impl ArtistDetailState {
@@ -64,10 +61,10 @@ impl ArtistDetailState {
             albums,
             related,
             list_state,
+            list_area: None,
             image_state: None,
             pending_image,
             image_loading,
-            scrollbar_state: ScrollbarState::default(),
         }
     }
 
@@ -195,14 +192,7 @@ impl ArtistDetailState {
             .highlight_style(hl_style)
             .highlight_symbol(hl_sym);
         frame.render_stateful_widget(list, chunks[1], &mut self.list_state);
-
-        let pos = self.list_state.selected().unwrap_or(0);
-        self.scrollbar_state = ScrollbarState::new(self.albums.len()).position(pos);
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            chunks[1],
-            &mut self.scrollbar_state,
-        );
+        self.list_area = Some(chunks[1]);
 
         has_pending
     }

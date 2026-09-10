@@ -162,6 +162,7 @@ pub struct AppState {
     pub input_mode: InputMode,
     pub command_input: String,
     pub command_completions: Vec<String>,
+    pub command_selected: usize,
     pub text_input: Option<TextInputCtx>,
     pub confirm: Option<ConfirmCtx>,
 
@@ -228,9 +229,12 @@ pub struct AppState {
     // Click areas updated each frame by ui::draw (used for mouse hit detection)
     pub sidebar_area: Option<ratatui::layout::Rect>,
     pub right_queue_area: Option<ratatui::layout::Rect>,
+    pub right_queue_scrollbar_area: Option<ratatui::layout::Rect>,
     pub queue_filter_bar_area: Option<ratatui::layout::Rect>,
     // Double-click detection: last click (col, row, instant)
     pub last_click: Option<(u16, u16, std::time::Instant)>,
+    // Whether the user is currently dragging the queue scrollbar thumb
+    pub dragging_queue_scrollbar: bool,
 
     // Target pixel size for grid thumbnails (computed from font metrics at startup)
     pub tui_target: (u32, u32),
@@ -266,6 +270,7 @@ impl AppState {
             input_mode: InputMode::Normal,
             command_input: String::new(),
             command_completions: Vec::new(),
+            command_selected: 0,
             text_input: None,
             confirm: None,
             show_help: false,
@@ -300,8 +305,10 @@ impl AppState {
             toolbar_hit_zones: ToolbarHitZones::default(),
             sidebar_area: None,
             right_queue_area: None,
+            right_queue_scrollbar_area: None,
             queue_filter_bar_area: None,
             last_click: None,
+            dragging_queue_scrollbar: false,
             tui_target,
         };
         state.reload_current_view();

@@ -13,6 +13,15 @@ use tornade_core::{
     services::LibraryService,
 };
 
+/// Which part of the album-detail view currently has keyboard focus.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum DetailSection {
+    #[default]
+    Tracks,
+    ArtistAlbums,
+    SimilarArtists,
+}
+
 pub struct AlbumDetailState {
     pub album: Album,
     pub tracks: Vec<Track>,
@@ -20,7 +29,13 @@ pub struct AlbumDetailState {
     pub skipped_ids: Vec<i64>,
     image_state: Option<StatefulProtocol>,
     artist_albums: Vec<Album>,
+    artist_albums_state: ListState,
+    /// Which section currently has keyboard focus.
+    pub section: DetailSection,
+    pub artist_albums_area: Option<Rect>,
     similar_artists: Vec<Artist>,
+    similar_artists_state: ListState,
+    pub similar_artists_area: Option<Rect>,
 }
 
 impl AlbumDetailState {
@@ -48,9 +63,17 @@ impl AlbumDetailState {
         let artist_albums = library
             .get_artist_albums(album.artist_id)
             .unwrap_or_default();
+        let mut artist_albums_state = ListState::default();
+        if !artist_albums.is_empty() {
+            artist_albums_state.select(Some(0));
+        }
         let similar_artists = library
             .get_similar_artists(album.artist_id)
             .unwrap_or_default();
+        let mut similar_artists_state = ListState::default();
+        if !similar_artists.is_empty() {
+            similar_artists_state.select(Some(0));
+        }
 
         Self {
             album,
@@ -59,7 +82,12 @@ impl AlbumDetailState {
             skipped_ids: Vec::new(),
             image_state,
             artist_albums,
+            artist_albums_state,
+            section: DetailSection::Tracks,
+            artist_albums_area: None,
             similar_artists,
+            similar_artists_state,
+            similar_artists_area: None,
         }
     }
 
@@ -80,40 +108,169 @@ impl AlbumDetailState {
         self.list_state.selected().and_then(|i| self.tracks.get(i))
     }
 
+    pub fn selected_artist_album(&self) -> Option<&Album> {
+        self.artist_albums_state
+            .selected()
+            .and_then(|i| self.artist_albums.get(i))
+    }
+
+    pub fn selected_similar_artist(&self) -> Option<&Artist> {
+        self.similar_artists_state
+            .selected()
+            .and_then(|i| self.similar_artists.get(i))
+    }
+
+    pub fn has_artist_albums(&self) -> bool {
+        !self.artist_albums.is_empty()
+    }
+
+    pub fn has_similar_artists(&self) -> bool {
+        !self.similar_artists.is_empty()
+    }
+
+    pub fn artist_albums_len(&self) -> usize {
+        self.artist_albums.len()
+    }
+
+    pub fn similar_artists_len(&self) -> usize {
+        self.similar_artists.len()
+    }
+
+    pub fn select_artist_album(&mut self, idx: usize) {
+        self.artist_albums_state.select(Some(idx));
+    }
+
+    pub fn select_similar_artist(&mut self, idx: usize) {
+        self.similar_artists_state.select(Some(idx));
+    }
+
+    /// Cycle keyboard focus forward through Tracks -> Albums by the artist ->
+    /// Artists same genre -> Tracks, skipping empty sections.
+    pub fn cycle_section(&mut self) {
+        let has_albums = self.has_artist_albums();
+        let has_similar = self.has_similar_artists();
+        self.section = match self.section {
+            DetailSection::Tracks if has_albums => DetailSection::ArtistAlbums,
+            DetailSection::Tracks if has_similar => DetailSection::SimilarArtists,
+            DetailSection::Tracks => DetailSection::Tracks,
+            DetailSection::ArtistAlbums if has_similar => DetailSection::SimilarArtists,
+            DetailSection::ArtistAlbums => DetailSection::Tracks,
+            DetailSection::SimilarArtists => DetailSection::Tracks,
+        };
+    }
+
     pub fn visible_track_ids(&self) -> Vec<i64> {
         self.tracks.iter().map(|t| t.id).collect()
     }
 
     pub fn move_down(&mut self) {
-        let len = self.tracks.len();
-        if len == 0 {
-            return;
+        match self.section {
+            DetailSection::ArtistAlbums => {
+                let len = self.artist_albums.len();
+                if len == 0 {
+                    return;
+                }
+                let n = self
+                    .artist_albums_state
+                    .selected()
+                    .map(|i| (i + 1).min(len - 1))
+                    .unwrap_or(0);
+                self.artist_albums_state.select(Some(n));
+            }
+            DetailSection::SimilarArtists => {
+                let len = self.similar_artists.len();
+                if len == 0 {
+                    return;
+                }
+                let n = self
+                    .similar_artists_state
+                    .selected()
+                    .map(|i| (i + 1).min(len - 1))
+                    .unwrap_or(0);
+                self.similar_artists_state.select(Some(n));
+            }
+            DetailSection::Tracks => {
+                let len = self.tracks.len();
+                if len == 0 {
+                    return;
+                }
+                let n = self
+                    .list_state
+                    .selected()
+                    .map(|i| (i + 1).min(len - 1))
+                    .unwrap_or(0);
+                self.list_state.select(Some(n));
+            }
         }
-        let n = self
-            .list_state
-            .selected()
-            .map(|i| (i + 1).min(len - 1))
-            .unwrap_or(0);
-        self.list_state.select(Some(n));
     }
 
     pub fn move_up(&mut self) {
-        let p = self
-            .list_state
-            .selected()
-            .map(|i| i.saturating_sub(1))
-            .unwrap_or(0);
-        self.list_state.select(Some(p));
+        match self.section {
+            DetailSection::ArtistAlbums => {
+                let p = self
+                    .artist_albums_state
+                    .selected()
+                    .map(|i| i.saturating_sub(1))
+                    .unwrap_or(0);
+                self.artist_albums_state.select(Some(p));
+            }
+            DetailSection::SimilarArtists => {
+                let p = self
+                    .similar_artists_state
+                    .selected()
+                    .map(|i| i.saturating_sub(1))
+                    .unwrap_or(0);
+                self.similar_artists_state.select(Some(p));
+            }
+            DetailSection::Tracks => {
+                let p = self
+                    .list_state
+                    .selected()
+                    .map(|i| i.saturating_sub(1))
+                    .unwrap_or(0);
+                self.list_state.select(Some(p));
+            }
+        }
     }
 
     pub fn jump_top(&mut self) {
-        if !self.tracks.is_empty() {
-            self.list_state.select(Some(0));
+        match self.section {
+            DetailSection::ArtistAlbums => {
+                if !self.artist_albums.is_empty() {
+                    self.artist_albums_state.select(Some(0));
+                }
+            }
+            DetailSection::SimilarArtists => {
+                if !self.similar_artists.is_empty() {
+                    self.similar_artists_state.select(Some(0));
+                }
+            }
+            DetailSection::Tracks => {
+                if !self.tracks.is_empty() {
+                    self.list_state.select(Some(0));
+                }
+            }
         }
     }
     pub fn jump_bottom(&mut self) {
-        if !self.tracks.is_empty() {
-            self.list_state.select(Some(self.tracks.len() - 1));
+        match self.section {
+            DetailSection::ArtistAlbums => {
+                if !self.artist_albums.is_empty() {
+                    self.artist_albums_state
+                        .select(Some(self.artist_albums.len() - 1));
+                }
+            }
+            DetailSection::SimilarArtists => {
+                if !self.similar_artists.is_empty() {
+                    self.similar_artists_state
+                        .select(Some(self.similar_artists.len() - 1));
+                }
+            }
+            DetailSection::Tracks => {
+                if !self.tracks.is_empty() {
+                    self.list_state.select(Some(self.tracks.len() - 1));
+                }
+            }
         }
     }
 
@@ -262,16 +419,29 @@ impl AlbumDetailState {
         frame.render_widget(header, v[0]);
 
         // Tracks: 2 columns if wide enough, 1 column otherwise
-        self.render_tracks(frame, v[1], focused, selection);
+        self.render_tracks(
+            frame,
+            v[1],
+            focused && self.section == DetailSection::Tracks,
+            selection,
+        );
 
         // Albums by the artist
         if artist_albums_h > 0 {
-            self.render_artist_albums(frame, v[2]);
+            self.render_artist_albums(
+                frame,
+                v[2],
+                focused && self.section == DetailSection::ArtistAlbums,
+            );
         }
 
         // Artists same genre
         if similar_h > 0 {
-            self.render_similar_artists(frame, v[3]);
+            self.render_similar_artists(
+                frame,
+                v[3],
+                focused && self.section == DetailSection::SimilarArtists,
+            );
         }
     }
 
@@ -394,48 +564,83 @@ impl AlbumDetailState {
         ListItem::new(line).style(style)
     }
 
-    fn render_artist_albums(&self, frame: &mut Frame, area: Rect) {
-        let mut lines = vec![
-            Line::from(Span::styled(
-                "Albums by the artist",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-        ];
-        let w = (area.width as usize).saturating_sub(8);
-        for album in self.artist_albums.iter().take(4) {
-            let year = album.year.map(|y| format!(" ({})", y)).unwrap_or_default();
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
+    fn render_artist_albums(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        let title = Paragraph::new(Line::from(Span::styled(
+            "Albums by the artist",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        let chunks = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
+        frame.render_widget(title, chunks[0]);
+
+        let w = (chunks[1].width as usize).saturating_sub(2);
+        let items: Vec<ListItem> = self
+            .artist_albums
+            .iter()
+            .map(|album| {
+                let year = album.year.map(|y| format!(" ({})", y)).unwrap_or_default();
+                ListItem::new(Line::from(Span::styled(
                     truncate(&format!("{}{}", album.title, year), w),
                     Style::default().fg(Color::Gray),
-                ),
-            ]));
-        }
-        frame.render_widget(Paragraph::new(lines).block(Block::default()), area);
+                )))
+            })
+            .collect();
+        let (hl_style, hl_sym) = if focused {
+            (
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+                "> ",
+            )
+        } else {
+            (Style::default().fg(Color::DarkGray), "  ")
+        };
+        let list = List::new(items)
+            .block(Block::default())
+            .highlight_style(hl_style)
+            .highlight_symbol(hl_sym);
+        frame.render_stateful_widget(list, chunks[1], &mut self.artist_albums_state);
+        self.artist_albums_area = Some(chunks[1]);
     }
 
-    fn render_similar_artists(&self, frame: &mut Frame, area: Rect) {
-        let mut lines = vec![
-            Line::from(Span::styled(
-                "Artists same Genre",
+    fn render_similar_artists(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        let title = Paragraph::new(Line::from(Span::styled(
+            "Artists same Genre",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        let chunks = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
+        frame.render_widget(title, chunks[0]);
+
+        let w = (chunks[1].width as usize).saturating_sub(2);
+        let items: Vec<ListItem> = self
+            .similar_artists
+            .iter()
+            .map(|artist| {
+                ListItem::new(Line::from(Span::styled(
+                    truncate(&artist.name, w),
+                    Style::default().fg(Color::Gray),
+                )))
+            })
+            .collect();
+        let (hl_style, hl_sym) = if focused {
+            (
                 Style::default()
-                    .fg(Color::Cyan)
+                    .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-        ];
-        let w = (area.width as usize).saturating_sub(4);
-        for artist in self.similar_artists.iter().take(4) {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(truncate(&artist.name, w), Style::default().fg(Color::Gray)),
-            ]));
-        }
-        frame.render_widget(Paragraph::new(lines).block(Block::default()), area);
+                "> ",
+            )
+        } else {
+            (Style::default().fg(Color::DarkGray), "  ")
+        };
+        let list = List::new(items)
+            .block(Block::default())
+            .highlight_style(hl_style)
+            .highlight_symbol(hl_sym);
+        frame.render_stateful_widget(list, chunks[1], &mut self.similar_artists_state);
+        self.similar_artists_area = Some(chunks[1]);
     }
 
     fn push_info_row<'a>(&self, lines: &mut Vec<Line<'a>>, label: &'static str, value: &str) {

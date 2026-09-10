@@ -90,6 +90,7 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         .split(right_panel_area);
 
     app.right_queue_area = Some(right_chunks[1]);
+    app.right_queue_scrollbar_area = None;
     app.queue_filter_bar_area = Some(right_chunks[0]);
     crate::views::queue::render_filter_bar(
         frame,
@@ -258,7 +259,13 @@ fn render_status(frame: &mut Frame, app: &AppState, area: Rect) {
 fn render_overlays(frame: &mut Frame, app: &mut AppState, area: Rect) {
     // Command bar
     if app.input_mode == InputMode::Command {
-        command_bar::render(frame, area, &app.command_input, &app.command_completions);
+        command_bar::render(
+            frame,
+            &app.command_input,
+            &app.command_completions,
+            app.command_selected,
+            area,
+        );
     }
 
     // Text input dialog

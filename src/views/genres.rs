@@ -5,10 +5,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
-    },
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use std::{
@@ -34,6 +31,11 @@ pub struct GenresState {
     pub mode: crate::views::ViewMode,
     pub list_state: ListState,
     pub search_bar_area: Option<Rect>,
+    pub list_area: Option<Rect>,
+    /// Area of the grid/mosaic rows (set in grid mode), plus the scroll offset used
+    /// that frame — needed to map a click back to a row index.
+    rows_area: Option<Rect>,
+    rows_scroll_offset: usize,
     /// Artwork paths (up to 4) per genre, indexed parallel to `genres`.
     artwork_paths: Vec<Vec<PathBuf>>,
     /// Lazily loaded mosaic protocols indexed parallel to `genres`.
@@ -43,7 +45,6 @@ pub struct GenresState {
     loading_ids: HashSet<usize>,
     /// Queue of decoded mosaics ready to be turned into protocols on the main thread.
     pending_decoded: PendingQueue,
-    scrollbar_state: ScrollbarState,
 }
 
 impl Default for GenresState {
@@ -55,11 +56,13 @@ impl Default for GenresState {
             mode: crate::views::ViewMode::default(),
             list_state: ListState::default(),
             search_bar_area: None,
+            list_area: None,
+            rows_area: None,
+            rows_scroll_offset: 0,
             artwork_paths: Vec::new(),
             image_states: Vec::new(),
             loading_ids: HashSet::new(),
             pending_decoded: Arc::new(Mutex::new(Vec::new())),
-            scrollbar_state: ScrollbarState::default(),
         }
     }
 }
@@ -99,6 +102,27 @@ impl GenresState {
         self.list_state
             .selected()
             .and_then(|i| filtered.get(i).copied())
+    }
+
+    /// Maps a mouse position to a genre index (into `filtered_genres()`), if any.
+    pub fn genre_at_pos(&self, x: u16, y: u16) -> Option<usize> {
+        let len = self.filtered_genres().len();
+        if let Some(a) = self.rows_area {
+            if a.width == 0 || x < a.x || y < a.y || x >= a.x + a.width || y >= a.y + a.height {
+                return None;
+            }
+            let row_in_view = ((y - a.y) / ROW_HEIGHT) as usize;
+            let idx = self.rows_scroll_offset + row_in_view;
+            if idx >= len { None } else { Some(idx) }
+        } else if let Some(a) = self.list_area {
+            if x < a.x || y < a.y || x >= a.x + a.width || y >= a.y + a.height {
+                return None;
+            }
+            let idx = (y - a.y) as usize + self.list_state.offset();
+            if idx >= len { None } else { Some(idx) }
+        } else {
+            None
+        }
     }
 
     pub fn move_down(&mut self) {
@@ -157,7 +181,6 @@ impl GenresState {
         self.search_bar_area = Some(chunks[0]);
 
         let filtered = self.filtered_genres();
-        let filtered_len = filtered.len();
         let selected = self.list_state.selected().unwrap_or(0);
 
         let has_photos = self.artwork_paths.iter().any(|p| !p.is_empty());
@@ -215,16 +238,10 @@ impl GenresState {
                     .highlight_style(hl_style)
                     .highlight_symbol(hl_sym);
                 frame.render_stateful_widget(list, chunks[2], &mut self.list_state);
+                self.list_area = Some(chunks[2]);
+                self.rows_area = None;
                 false
             };
-
-        let pos = self.list_state.selected().unwrap_or(0);
-        self.scrollbar_state = ScrollbarState::new(filtered_len).position(pos);
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            chunks[2],
-            &mut self.scrollbar_state,
-        );
 
         has_pending
     }
@@ -242,6 +259,7 @@ impl GenresState {
         tui_dir: &std::path::Path,
     ) -> bool {
         if area.height == 0 || names.is_empty() {
+            self.rows_area = None;
             return false;
         }
 
@@ -260,6 +278,9 @@ impl GenresState {
         let rows_visible = (area.height / ROW_HEIGHT) as usize;
         let scroll_offset = selected.saturating_sub(rows_visible.saturating_sub(1));
         let end = (scroll_offset + rows_visible + 1).min(names.len());
+        self.rows_area = Some(area);
+        self.rows_scroll_offset = scroll_offset;
+        self.list_area = None;
 
         // 2. Spawn background threads for visible genres not yet loaded/loading.
         for rel_idx in scroll_offset..end {

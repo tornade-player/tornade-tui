@@ -163,6 +163,16 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 return;
             }
 
+            // Click on the queue scrollbar track/thumb starts a drag.
+            if let Some(area) = app.right_queue_scrollbar_area
+                && rect_contains(area, col, row)
+            {
+                app.dragging_queue_scrollbar = true;
+                drag_queue_scrollbar(app, area, row);
+                app.focused_panel = FocusedPanel::RightPanel;
+                return;
+            }
+
             // Click on the queue filter bar activates it for typing.
             if let Some(area) = app.queue_filter_bar_area
                 && rect_contains(area, col, row)
@@ -172,17 +182,84 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 return;
             }
 
-            // Click on an album in the grid
-            let clicked_idx = if let View::Albums(s) = app.nav.current() {
-                s.album_at_pos(col, row)
+            // Click on an item in the Albums / Artists / Genres grid or list.
+            let clicked_idx = match app.nav.current() {
+                View::Albums(s) if s.mode == crate::views::ViewMode::Grid => {
+                    s.album_at_pos(col, row)
+                }
+                View::Albums(s) => s.list_area.and_then(|a| {
+                    row_to_index(
+                        a,
+                        col,
+                        row,
+                        s.list_mode_state.offset(),
+                        s.display_albums().len(),
+                    )
+                }),
+                View::Artists(s) if s.mode == crate::views::ViewMode::Grid => {
+                    s.artist_at_pos(col, row)
+                }
+                View::Artists(s) => s.list_area.and_then(|a| {
+                    row_to_index(
+                        a,
+                        col,
+                        row,
+                        s.list_mode_state.offset(),
+                        s.display_artists().len(),
+                    )
+                }),
+                View::Genres(s) => s.genre_at_pos(col, row),
+                _ => None,
+            };
+            if let Some(idx) = clicked_idx {
+                match app.nav.current_mut() {
+                    View::Albums(s) => s.selected = idx,
+                    View::Artists(s) => s.selected = idx,
+                    View::Genres(s) => {
+                        s.list_state.select(Some(idx));
+                    }
+                    _ => {}
+                }
+                match app.nav.current() {
+                    View::Albums(_) => push_album_detail(app),
+                    View::Artists(_) => push_artist_detail(app),
+                    View::Genres(_) => push_genre_detail(app),
+                    _ => {}
+                }
+                return;
+            }
+
+            // Click on an item in "Albums by the artist" (album detail view)
+            let artist_albums_click = if let View::AlbumDetail(s) = app.nav.current() {
+                s.artist_albums_area
+                    .and_then(|a| row_to_index(a, col, row, 0, s.artist_albums_len()))
             } else {
                 None
             };
-            if let Some(idx) = clicked_idx {
-                if let View::Albums(s) = app.nav.current_mut() {
-                    s.selected = idx;
+            if let Some(idx) = artist_albums_click {
+                if let View::AlbumDetail(s) = app.nav.current_mut() {
+                    s.section = crate::views::album_detail::DetailSection::ArtistAlbums;
+                    s.select_artist_album(idx);
                 }
-                push_album_detail(app);
+                app.focused_panel = FocusedPanel::Content;
+                push_album_from_artist_albums(app);
+                return;
+            }
+
+            // Click on an item in "Artists same Genre" (album detail view)
+            let similar_artists_click = if let View::AlbumDetail(s) = app.nav.current() {
+                s.similar_artists_area
+                    .and_then(|a| row_to_index(a, col, row, 0, s.similar_artists_len()))
+            } else {
+                None
+            };
+            if let Some(idx) = similar_artists_click {
+                if let View::AlbumDetail(s) = app.nav.current_mut() {
+                    s.section = crate::views::album_detail::DetailSection::SimilarArtists;
+                    s.select_similar_artist(idx);
+                }
+                app.focused_panel = FocusedPanel::Content;
+                push_artist_detail_from_similar(app);
                 return;
             }
 
@@ -263,8 +340,18 @@ pub fn handle_mouse(app: &mut AppState, mouse: MouseEvent) {
                 }
             }
         }
-        MouseEventKind::ScrollDown => scroll_content(app, 1),
-        MouseEventKind::ScrollUp => scroll_content(app, -1),
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if app.dragging_queue_scrollbar
+                && let Some(area) = app.right_queue_area
+            {
+                drag_queue_scrollbar(app, area, mouse.row);
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            app.dragging_queue_scrollbar = false;
+        }
+        MouseEventKind::ScrollDown => scroll_content(app, mouse.column, mouse.row, 1),
+        MouseEventKind::ScrollUp => scroll_content(app, mouse.column, mouse.row, -1),
         _ => {}
     }
 }
@@ -323,7 +410,75 @@ fn rect_contains(r: ratatui::layout::Rect, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
 }
 
-fn scroll_content(app: &mut AppState, delta: i32) {
+/// Maps a click at (col, row) to an index in a single-column list occupying `area`,
+/// accounting for the list's current scroll `offset`.
+fn row_to_index(area: ratatui::layout::Rect, col: u16, row: u16, offset: usize, len: usize) -> Option<usize> {
+    if !rect_contains(area, col, row) {
+        return None;
+    }
+    let idx = (row - area.y) as usize + offset;
+    if idx < len { Some(idx) } else { None }
+}
+
+fn queue_visible_len(app: &AppState) -> usize {
+    if app.queue_filter.is_empty() {
+        app.cached_queue_tracks.len()
+    } else {
+        let filter_lower = app.queue_filter.to_lowercase();
+        app.cached_queue_tracks
+            .iter()
+            .filter(|t| {
+                t.title.to_lowercase().contains(&filter_lower)
+                    || t.artist_names
+                        .iter()
+                        .any(|a| a.to_lowercase().contains(&filter_lower))
+            })
+            .count()
+    }
+}
+
+/// Maps a mouse row on the queue scrollbar track to a selection index and updates it.
+fn drag_queue_scrollbar(app: &mut AppState, area: ratatui::layout::Rect, row: u16) {
+    let visible_len = queue_visible_len(app);
+    if visible_len == 0 || area.height == 0 {
+        return;
+    }
+    let rel = row.saturating_sub(area.y) as usize;
+    let track_height = area.height as usize;
+    let target = if track_height <= 1 {
+        0
+    } else {
+        rel * visible_len.saturating_sub(1) / (track_height - 1)
+    };
+    app.right_panel_queue_state
+        .select(Some(target.min(visible_len - 1)));
+}
+
+fn scroll_content(app: &mut AppState, col: u16, row: u16, delta: i32) {
+    if let Some(area) = app.right_queue_area {
+        if rect_contains(area, col, row) {
+            let visible_len = queue_visible_len(app);
+            if visible_len == 0 {
+                return;
+            }
+            if delta > 0 {
+                let next = app
+                    .right_panel_queue_state
+                    .selected()
+                    .map(|i| (i + 1).min(visible_len - 1))
+                    .unwrap_or(0);
+                app.right_panel_queue_state.select(Some(next));
+            } else {
+                let prev = app
+                    .right_panel_queue_state
+                    .selected()
+                    .map(|i| i.saturating_sub(1))
+                    .unwrap_or(0);
+                app.right_panel_queue_state.select(Some(prev));
+            }
+            return;
+        }
+    }
     if delta > 0 {
         move_down(app);
     } else {
@@ -341,10 +496,7 @@ pub fn handle_key(app: &mut AppState, key: KeyEvent) -> bool {
     // Dispatch by current input mode
     match app.input_mode {
         InputMode::Normal => handle_normal(app, key),
-        InputMode::Command => {
-            handle_command_mode(app, key);
-            false
-        }
+        InputMode::Command => handle_command_mode(app, key),
         InputMode::TextInput => {
             handle_text_input(app, key);
             false
@@ -416,6 +568,18 @@ fn handle_normal(app: &mut AppState, key: KeyEvent) -> bool {
     if key.code == KeyCode::Tab && matches!(app.nav.current(), View::Search(_)) {
         if let View::Search(s) = app.nav.current_mut() {
             s.next_section();
+        }
+        return false;
+    }
+
+    // In AlbumDetail view, Tab cycles focus between tracks, "Albums by the artist"
+    // and "Artists same genre" (skipping empty sections) instead of panel focus.
+    if key.code == KeyCode::Tab
+        && let View::AlbumDetail(s) = app.nav.current()
+        && (s.has_artist_albums() || s.has_similar_artists())
+    {
+        if let View::AlbumDetail(s) = app.nav.current_mut() {
+            s.cycle_section();
         }
         return false;
     }
@@ -498,7 +662,6 @@ fn handle_sidebar_focus(app: &mut AppState, key: KeyEvent) -> bool {
             };
             let _ = app.player.set_repeat(next);
         }
-        KeyCode::Char('q') => return true,
         _ => {}
     }
     false
@@ -629,7 +792,6 @@ fn handle_right_panel_focus(app: &mut AppState, key: KeyEvent) -> bool {
             };
             let _ = app.player.set_repeat(next);
         }
-        KeyCode::Char('q') => return true,
         _ => {}
     }
     false
@@ -677,14 +839,13 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
     }
 
     match key.code {
-        // ── Quit / back ──
+        // ── Back ──
         KeyCode::Char('q') | KeyCode::Esc => {
-            if app.nav.is_root() {
-                return true;
+            if !app.nav.is_root() {
+                // Leaving a detail view clears any active selection (FR-016).
+                app.selection.clear();
+                app.nav.pop();
             }
-            // Leaving a detail view clears any active selection (FR-016).
-            app.selection.clear();
-            app.nav.pop();
         }
 
         // ── Help ──
@@ -695,6 +856,7 @@ fn handle_content_focus(app: &mut AppState, key: KeyEvent) -> bool {
             app.input_mode = InputMode::Command;
             app.command_input.clear();
             app.command_completions = completions::complete("");
+            app.command_selected = 0;
         }
 
         // ── Sidebar navigation (1-5) ──
@@ -910,6 +1072,19 @@ pub fn handle_media_key(app: &mut AppState, event: crate::media_keys::MediaKeyEv
 }
 
 fn handle_enter(app: &mut AppState) {
+    if let View::AlbumDetail(s) = app.nav.current() {
+        match s.section {
+            crate::views::album_detail::DetailSection::ArtistAlbums => {
+                push_album_from_artist_albums(app);
+                return;
+            }
+            crate::views::album_detail::DetailSection::SimilarArtists => {
+                push_artist_detail_from_similar(app);
+                return;
+            }
+            crate::views::album_detail::DetailSection::Tracks => {}
+        }
+    }
     match app.nav.current() {
         View::Library(_)
         | View::AlbumDetail(_)
@@ -925,6 +1100,35 @@ fn handle_enter(app: &mut AppState) {
         View::ArtistDetail(_) => push_album_from_artist(app),
         View::Search(_) => handle_search_enter(app),
         View::Scan(_) => {}
+    }
+}
+
+fn push_album_from_artist_albums(app: &mut AppState) {
+    let album = match app.nav.current() {
+        View::AlbumDetail(s) => s.selected_artist_album().cloned(),
+        _ => None,
+    };
+    if let Some(album) = album {
+        let tui_dir = crate::tui_artwork::tui_album_dir(&app.paths, app.tui_target);
+        let state = AlbumDetailState::new(album, &app.library, &mut app.picker, &tui_dir);
+        app.nav.push(View::AlbumDetail(state));
+    }
+}
+
+fn push_artist_detail_from_similar(app: &mut AppState) {
+    let artist = match app.nav.current() {
+        View::AlbumDetail(s) => s.selected_similar_artist().cloned(),
+        _ => None,
+    };
+    if let Some(artist) = artist {
+        let tui_dir = crate::tui_artwork::tui_artist_dir(&app.paths, app.tui_target);
+        let photo_dir = if tui_dir.join(format!("{}.jpg", artist.id)).exists() {
+            tui_dir
+        } else {
+            app.paths.artist_photo_dir()
+        };
+        let state = ArtistDetailState::new(artist, &app.library, &mut app.picker, &photo_dir);
+        app.nav.push(View::ArtistDetail(state));
     }
 }
 
@@ -1583,37 +1787,55 @@ fn handle_artwork_menu(app: &mut AppState, key: KeyEvent) {
 
 // ── Command mode ─────────────────────────────────────────────────────────────
 
-fn handle_command_mode(app: &mut AppState, key: KeyEvent) {
+fn handle_command_mode(app: &mut AppState, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => {
             app.input_mode = InputMode::Normal;
             app.command_input.clear();
             app.command_completions.clear();
+            app.command_selected = 0;
         }
         KeyCode::Enter => {
             let input = app.command_input.clone();
             app.input_mode = InputMode::Normal;
             app.command_input.clear();
             app.command_completions.clear();
+            app.command_selected = 0;
+            if matches!(input.trim(), "q" | "qa") {
+                return true;
+            }
             execute_command(app, &input);
         }
         KeyCode::Backspace => {
             app.command_input.pop();
             app.command_completions = completions::complete(&app.command_input);
+            app.command_selected = 0;
+        }
+        KeyCode::Down => {
+            if !app.command_completions.is_empty() {
+                app.command_selected =
+                    (app.command_selected + 1).min(app.command_completions.len() - 1);
+            }
+        }
+        KeyCode::Up => {
+            app.command_selected = app.command_selected.saturating_sub(1);
         }
         KeyCode::Tab => {
-            // Pick first completion
-            if let Some(first) = app.command_completions.first().cloned() {
-                app.command_input = first;
+            // Accept the highlighted completion
+            if let Some(sel) = app.command_completions.get(app.command_selected).cloned() {
+                app.command_input = sel;
                 app.command_completions = completions::complete(&app.command_input);
+                app.command_selected = 0;
             }
         }
         KeyCode::Char(c) => {
             app.command_input.push(c);
             app.command_completions = completions::complete(&app.command_input);
+            app.command_selected = 0;
         }
         _ => {}
     }
+    false
 }
 
 fn execute_command(app: &mut AppState, input: &str) {

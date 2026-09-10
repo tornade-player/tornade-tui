@@ -18,6 +18,8 @@ pub static COMMAND_LIST: &[&str] = &[
     ":playlists",
     ":queue",
     ":search",
+    ":q",
+    ":qa",
 ];
 
 /// Return all commands that start with `partial` (case-insensitive, without leading colon).
