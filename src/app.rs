@@ -187,7 +187,8 @@ pub struct AppState {
     /// Worker thread handle for async MusicBrainz / artwork calls (US3).
     pub async_worker: AsyncWorker,
     /// Receiver for the in-flight background library scan, if any.
-    pub scan_job: Option<std::sync::mpsc::Receiver<Result<tornade_core::services::ScanResult, String>>>,
+    pub scan_job:
+        Option<std::sync::mpsc::Receiver<Result<tornade_core::services::ScanResult, String>>>,
 
     // Panel focus
     pub focused_panel: FocusedPanel,

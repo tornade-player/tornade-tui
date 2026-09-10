@@ -4,12 +4,12 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
+    symbols::Marker,
     text::{Line, Span},
     widgets::{
         Block, Gauge, Paragraph,
         canvas::{Canvas, Circle, Points},
     },
-    symbols::Marker,
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 use tornade_core::models::AudioFormat;
@@ -117,10 +117,10 @@ pub fn render(
     // Bottom row: [transport=10] [gap=1] [elapsed=5] [progress] [total=5]
     let bottom = Layout::horizontal([
         Constraint::Length(9), // transport (prev + play + next)
-        Constraint::Length(1),  // gap — mirrors top artwork gap
-        Constraint::Length(5),  // elapsed
-        Constraint::Min(0),     // progress gauge
-        Constraint::Length(5),  // total
+        Constraint::Length(1), // gap — mirrors top artwork gap
+        Constraint::Length(5), // elapsed
+        Constraint::Min(0),    // progress gauge
+        Constraint::Length(5), // total
     ])
     .split(vert[1]);
 

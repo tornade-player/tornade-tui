@@ -412,7 +412,13 @@ fn rect_contains(r: ratatui::layout::Rect, col: u16, row: u16) -> bool {
 
 /// Maps a click at (col, row) to an index in a single-column list occupying `area`,
 /// accounting for the list's current scroll `offset`.
-fn row_to_index(area: ratatui::layout::Rect, col: u16, row: u16, offset: usize, len: usize) -> Option<usize> {
+fn row_to_index(
+    area: ratatui::layout::Rect,
+    col: u16,
+    row: u16,
+    offset: usize,
+    len: usize,
+) -> Option<usize> {
     if !rect_contains(area, col, row) {
         return None;
     }

@@ -6,13 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState},
 };
 
-pub fn render(
-    frame: &mut Frame,
-    input: &str,
-    completions: &[String],
-    selected: usize,
-    area: Rect,
-) {
+pub fn render(frame: &mut Frame, input: &str, completions: &[String], selected: usize, area: Rect) {
     let max_visible = 8usize.min(completions.len());
     let list_height = if completions.is_empty() {
         0
