@@ -57,8 +57,9 @@ cargo build --release
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
 | `Enter` | Open detail / play |
-| `q` / `Esc` | Back / quit |
+| `q` / `Esc` | Back |
 | `?` | Help overlay |
+| `Ctrl+C` | Quit |
 
 ### Playback
 
@@ -118,6 +119,7 @@ Press `:` to open the command bar. Press `Tab` to autocomplete, `Esc` to cancel.
 | `:playlist add <name>` | Add selected track to a playlist |
 | `:seek <mm:ss>` | Seek to position |
 | `:help` | Show help overlay |
+| `:q` / `:qa` | Quit |
 
 ## Image Rendering
 

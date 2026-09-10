@@ -30,19 +30,44 @@ jobs:
           git tag "${{ steps.version.outputs.version }}"
           git push origin "${{ steps.version.outputs.version }}"
 
-  build:
+  build-linux:
+    name: Build (linux-x86_64)
+    runs-on: ubuntu-latest
+    needs: tag
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ALSA dev headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package
+        run: |
+          tar -czf tornade-tui-${{ needs.tag.outputs.version }}-linux-x86_64.tar.gz \
+            -C target/release tornade-tui
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-linux-x86_64
+          path: "tornade-tui-*.tar.gz"
+
+  build-others:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: tag
+    needs: [tag, build-linux]
     permissions:
       contents: write
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact_name: tornade-tui
-            archive_ext: tar.gz
-            platform: linux-x86_64
           - os: macos-latest
             artifact_name: tornade-tui
             archive_ext: tar.gz
@@ -54,17 +79,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ALSA dev headers (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build (Linux/Windows)
-        if: matrix.os != 'macos-latest'
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
         run: cargo build --release
 
       - name: Build universal binary (macOS)
@@ -77,8 +98,8 @@ jobs:
             target/aarch64-apple-darwin/release/tornade-tui \
             -output target/release/tornade-tui
 
-      - name: Package (Linux/macOS)
-        if: matrix.os != 'windows-latest'
+      - name: Package (macOS)
+        if: matrix.os == 'macos-latest'
         run: |
           tar -czf tornade-tui-${{ needs.tag.outputs.version }}-${{ matrix.platform }}.tar.gz \
             -C target/release tornade-tui
@@ -96,7 +117,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [tag, build]
+    needs: [tag, build-linux, build-others]
     permissions:
       contents: write
     steps:
@@ -119,7 +140,7 @@ jobs:
   notify-failure:
     name: Notify on Failure
     runs-on: ubuntu-latest
-    needs: [tag, build, publish]
+    needs: [tag, build-linux, build-others, publish]
     if: failure()
     permissions:
       issues: write
@@ -128,13 +149,15 @@ jobs:
         env:
           VERSION: ${{ github.event.client_payload.version }}
           TAG_RESULT: ${{ needs.tag.result }}
-          BUILD_RESULT: ${{ needs.build.result }}
+          BUILD_LINUX_RESULT: ${{ needs.build-linux.result }}
+          BUILD_OTHERS_RESULT: ${{ needs.build-others.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         with:
           script: |
             const jobs = {
               'Create Release Tag': process.env.TAG_RESULT,
-              'Build binaries': process.env.BUILD_RESULT,
+              'Build (linux)': process.env.BUILD_LINUX_RESULT,
+              'Build (macos/windows)': process.env.BUILD_OTHERS_RESULT,
               'Publish Release': process.env.PUBLISH_RESULT,
             };
             const failed = Object.entries(jobs)
