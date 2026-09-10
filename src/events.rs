@@ -461,29 +461,29 @@ fn drag_queue_scrollbar(app: &mut AppState, area: ratatui::layout::Rect, row: u1
 }
 
 fn scroll_content(app: &mut AppState, col: u16, row: u16, delta: i32) {
-    if let Some(area) = app.right_queue_area {
-        if rect_contains(area, col, row) {
-            let visible_len = queue_visible_len(app);
-            if visible_len == 0 {
-                return;
-            }
-            if delta > 0 {
-                let next = app
-                    .right_panel_queue_state
-                    .selected()
-                    .map(|i| (i + 1).min(visible_len - 1))
-                    .unwrap_or(0);
-                app.right_panel_queue_state.select(Some(next));
-            } else {
-                let prev = app
-                    .right_panel_queue_state
-                    .selected()
-                    .map(|i| i.saturating_sub(1))
-                    .unwrap_or(0);
-                app.right_panel_queue_state.select(Some(prev));
-            }
+    if let Some(area) = app.right_queue_area
+        && rect_contains(area, col, row)
+    {
+        let visible_len = queue_visible_len(app);
+        if visible_len == 0 {
             return;
         }
+        if delta > 0 {
+            let next = app
+                .right_panel_queue_state
+                .selected()
+                .map(|i| (i + 1).min(visible_len - 1))
+                .unwrap_or(0);
+            app.right_panel_queue_state.select(Some(next));
+        } else {
+            let prev = app
+                .right_panel_queue_state
+                .selected()
+                .map(|i| i.saturating_sub(1))
+                .unwrap_or(0);
+            app.right_panel_queue_state.select(Some(prev));
+        }
+        return;
     }
     if delta > 0 {
         move_down(app);
