@@ -1829,7 +1829,7 @@ fn handle_command_mode(app: &mut AppState, key: KeyEvent) -> bool {
         KeyCode::Tab => {
             // Accept the highlighted completion
             if let Some(sel) = app.command_completions.get(app.command_selected).cloned() {
-                app.command_input = sel;
+                app.command_input = sel.insert;
                 app.command_completions = completions::complete(&app.command_input);
                 app.command_selected = 0;
             }

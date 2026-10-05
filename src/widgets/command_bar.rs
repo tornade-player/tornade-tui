@@ -1,3 +1,4 @@
+use crate::commands::completions::Completion;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Margin, Rect},
@@ -6,7 +7,13 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState},
 };
 
-pub fn render(frame: &mut Frame, input: &str, completions: &[String], selected: usize, area: Rect) {
+pub fn render(
+    frame: &mut Frame,
+    input: &str,
+    completions: &[Completion],
+    selected: usize,
+    area: Rect,
+) {
     let max_visible = 8usize.min(completions.len());
     let list_height = if completions.is_empty() {
         0
@@ -64,7 +71,7 @@ pub fn render(frame: &mut Frame, input: &str, completions: &[String], selected: 
                 } else {
                     Style::default().fg(Color::Gray)
                 };
-                ListItem::new(Line::from(Span::styled(format!(" :{} ", c), style)))
+                ListItem::new(Line::from(Span::styled(format!(" :{} ", c.label), style)))
             })
             .collect();
         let list = List::new(items).block(Block::default());
