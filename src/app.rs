@@ -161,7 +161,7 @@ pub struct AppState {
     // Input mode
     pub input_mode: InputMode,
     pub command_input: String,
-    pub command_completions: Vec<String>,
+    pub command_completions: Vec<crate::commands::completions::Completion>,
     pub command_selected: usize,
     pub text_input: Option<TextInputCtx>,
     pub confirm: Option<ConfirmCtx>,
@@ -280,7 +280,7 @@ impl AppState {
             show_prefs: false,
             prefs_lines: Vec::new(),
             artwork_fetching: false,
-            artwork_enabled: true,
+            artwork_enabled: false,
             show_playlist_selector: false,
             playlist_selector_state: ratatui::widgets::ListState::default(),
             tag_editor: None,

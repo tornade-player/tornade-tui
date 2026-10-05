@@ -94,6 +94,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    log::info!("Image protocol in use: {:?}", picker.protocol_type());
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();

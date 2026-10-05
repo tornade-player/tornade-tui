@@ -110,11 +110,7 @@ pub fn draw(frame: &mut Frame, app: &mut AppState) {
         frame,
         right_chunks[3],
         &app.player_cache,
-        if app.artwork_enabled {
-            app.player_artwork.as_mut()
-        } else {
-            None
-        },
+        app.player_artwork.as_mut(),
         album_name,
     );
 
